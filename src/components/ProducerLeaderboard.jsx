@@ -4,6 +4,7 @@ const COLUMNS = [
   { id: 'canonical', label: 'Producer', numeric: false },
   { id: 'eligibleCustomers', label: 'Customers', numeric: true },
   { id: 'writtenPremium', label: 'Written Prem', numeric: true },
+  { id: 'writtenAnnualized', label: 'Written Ann', numeric: true },
   { id: 'activePremium', label: 'Active Prem', numeric: true },
   { id: 'custRetention', label: 'Cust Ret', numeric: true },
   { id: 'writtenPremRetention', label: 'Wr Prem Ret', numeric: true },
@@ -49,6 +50,7 @@ function DetailPanel({ producer }) {
               <th className="text-left px-2 py-1">First Eff</th>
               <th className="text-right px-2 py-1">Tenure (d)</th>
               <th className="text-right px-2 py-1">Written</th>
+              <th className="text-right px-2 py-1">Written Ann</th>
               <th className="text-right px-2 py-1">Active Wr</th>
               <th className="text-right px-2 py-1">Active Ann</th>
               <th className="text-right px-2 py-1">Active Polys</th>
@@ -64,6 +66,7 @@ function DetailPanel({ producer }) {
                 <td className="px-2 py-1">{c.firstEffDate}</td>
                 <td className="text-right px-2 py-1">{c.tenureDays}</td>
                 <td className="text-right px-2 py-1">{fmt$(c.writtenPremium)}</td>
+                <td className="text-right px-2 py-1">{fmt$(c.writtenAnnualized)}</td>
                 <td className="text-right px-2 py-1">{fmt$(c.activeWritten)}</td>
                 <td className="text-right px-2 py-1">{fmt$(c.activePremium)}</td>
                 <td className="text-right px-2 py-1">{c.activePolicyCount}</td>
@@ -135,8 +138,11 @@ export default function ProducerLeaderboard({ producers, showAdmins, onToggleAdm
               ))}
             </tr>
             <tr className="text-[10px] text-slate-500 border-t border-slate-200">
-              <th colSpan={5}></th>
-              <th className="text-right px-3 py-1"></th>
+              <th colSpan={3}></th>
+              <th className="text-right px-3 py-1 font-normal">same-term</th>
+              <th className="text-right px-3 py-1 font-normal">12mo</th>
+              <th className="text-right px-3 py-1 font-normal">12mo</th>
+              <th></th>
               <th className="text-right px-3 py-1 font-normal">same-term</th>
               <th className="text-right px-3 py-1 font-normal">12mo both sides</th>
               <th colSpan={3}></th>
@@ -163,6 +169,7 @@ export default function ProducerLeaderboard({ producers, showAdmins, onToggleAdm
                       {(p.excludedNew + p.excludedUnmatched) > 0 && <span className="text-slate-400 text-xs"> +{p.excludedNew + p.excludedUnmatched}</span>}
                     </td>
                     <td className="text-right px-3 py-2">{fmt$(p.writtenPremium)}</td>
+                    <td className="text-right px-3 py-2">{fmt$(p.writtenAnnualized)}</td>
                     <td className="text-right px-3 py-2">{fmt$(p.activePremium)}</td>
                     <td className={`text-right px-3 py-2 font-semibold ${retentionTone(p.custRetention)}`}>{fmtPct(p.custRetention)}</td>
                     <td className={`text-right px-3 py-2 ${retentionTone(p.writtenPremRetention)}`}>{fmtPct(p.writtenPremRetention)}</td>
@@ -178,7 +185,7 @@ export default function ProducerLeaderboard({ producers, showAdmins, onToggleAdm
                   </tr>
                   {isOpen && (
                     <tr>
-                      <td colSpan={11} className="p-0">
+                      <td colSpan={12} className="p-0">
                         <DetailPanel producer={p} />
                       </td>
                     </tr>
@@ -187,7 +194,7 @@ export default function ProducerLeaderboard({ producers, showAdmins, onToggleAdm
               );
             })}
             {!rows.length && (
-              <tr><td colSpan={11} className="text-center text-slate-500 py-6">No producers.</td></tr>
+              <tr><td colSpan={12} className="text-center text-slate-500 py-6">No producers.</td></tr>
             )}
           </tbody>
         </table>

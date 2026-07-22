@@ -210,6 +210,10 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
     const eligible = p.customers.filter(c => c.eligible && !c.allUnmatched);
     const retained = eligible.filter(c => c.retained);
     const writtenPremium = p.customers.reduce((s, c) => s + c.writtenPremium, 0);
+    // Annualized-at-bind version of writtenPremium — sums across ALL of the
+    // producer's customers (not just eligible) so it compares 1:1 with the
+    // raw Written Prem column beside it.
+    const writtenAnnualizedAll = p.customers.reduce((s, c) => s + c.writtenAnnualized, 0);
     const activePremium = eligible.reduce((s, c) => s + c.activePremium, 0);
     const activeWritten = eligible.reduce((s, c) => s + c.activeWritten, 0);
     const eligibleWritten = eligible.reduce((s, c) => s + c.writtenPremium, 0);
@@ -245,6 +249,7 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
       excludedUnmatched,
       retainedCustomers: retained.length,
       writtenPremium,
+      writtenAnnualized: writtenAnnualizedAll,
       activePremium,
       activeWritten,
       custRetention,
