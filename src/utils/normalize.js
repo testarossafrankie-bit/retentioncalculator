@@ -1,8 +1,9 @@
 // Sales-log-side prefixes that don't appear on the Policy Master. Progressive
-// Property policies are booked with a "PRG" prefix in the sales log but the
-// EZLynx master stores the bare policy number. Strip them so both sides can
-// match. Add carrier prefixes here as we find them.
-const STRIPPABLE_PREFIXES = ['prg'];
+// Property policies show up in the sales log with a "PGR" (Progressive ticker)
+// prefix — the EZLynx master stores the bare policy number. "Q" is
+// Progressive's Quote letter; sales log sometimes retains it even after bind.
+// Longest prefixes first so a "PGRQ..." style doesn't shave only one letter.
+const STRIPPABLE_PREFIXES = ['pgr', 'prg', 'q'];
 
 export function normalizePolicyNum(v) {
   if (v == null) return '';
