@@ -75,6 +75,20 @@ export function canonicalLOB(v) {
   return v;
 }
 
+// Carriers not present in the EZLynx book of business — sales with these
+// carriers are dropped from the retention calc entirely (don't count as
+// written OR retained OR lost). Add more here as they come up.
+const DISREGARDED_CARRIERS = new Set(['cure']);
+
+export function isDisregardedCarrier(v) {
+  if (v == null) return false;
+  const s = String(v).toLowerCase().trim();
+  for (const d of DISREGARDED_CARRIERS) {
+    if (s.includes(d)) return true;
+  }
+  return false;
+}
+
 export function canonicalCarrier(v) {
   if (v == null) return '';
   const s = String(v).toLowerCase().trim();

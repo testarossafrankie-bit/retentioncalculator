@@ -12,6 +12,7 @@ import { matchSales } from '../utils/match.js';
 import { computeRetention } from '../utils/retentionCalc.js';
 import { buildProducerResolver } from '../utils/producerAliases.js';
 import { inRange, priorMonthRange, parseFilterDateRange, iso } from '../utils/dateRange.js';
+import { isDisregardedCarrier } from '../utils/normalize.js';
 
 const TABS = [
   { id: 'leaderboard', label: 'Producer Leaderboard' },
@@ -191,7 +192,10 @@ export default function Retention() {
   }, [policyMaster]);
 
   const salesInRange = useMemo(() => {
-    const filtered = sales.filter(s => inRange(s[dateField], start, end));
+    const filtered = sales.filter(s =>
+      inRange(s[dateField], start, end) &&
+      !isDisregardedCarrier(s.carrier)
+    );
     // Apply session-only corrections from the Unmatched cleanup UI
     return filtered.map(s => salesOverrides[s.id] ? { ...s, ...salesOverrides[s.id] } : s);
   }, [sales, dateField, start, end, salesOverrides]);
