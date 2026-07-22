@@ -25,7 +25,7 @@ function Card({ label, value, sub, tone = 'slate' }) {
 
 export default function AgencyKPIs({ agency }) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+    <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
       <Card
         label="Customer Retention"
         value={fmtPct(agency.custRetention)}
@@ -47,7 +47,12 @@ export default function AgencyKPIs({ agency }) {
       <Card
         label="Written Premium"
         value={fmt$(agency.writtenPremium)}
-        sub={`${agency.totalCustomers} unique customers`}
+        sub={`${agency.totalCustomers} unique customers · same-term`}
+      />
+      <Card
+        label="Written Ann"
+        value={fmt$(agency.writtenAnnualized)}
+        sub="12mo annualized at bind"
       />
       <Card
         label="Excluded"

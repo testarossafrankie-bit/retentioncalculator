@@ -287,6 +287,10 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
   const allEligible = customerStats.filter(c => c.eligible && !c.allUnmatched);
   const allRetained = allEligible.filter(c => c.retained);
   const agencyWritten = customerStats.reduce((s, c) => s + c.writtenPremium, 0);
+  // Annualized-at-bind across ALL customers (matches leaderboard's Written Ann
+  // column scope). The eligible-only version below is only for the retention
+  // ratio denominator.
+  const agencyWrittenAnnualized = customerStats.reduce((s, c) => s + c.writtenAnnualized, 0);
   const agencyEligibleWritten = allEligible.reduce((s, c) => s + c.writtenPremium, 0);
   const agencyEligibleWrittenAnnualized = allEligible.reduce((s, c) => s + c.writtenAnnualized, 0);
   const agencyActive = allEligible.reduce((s, c) => s + c.activePremium, 0);
@@ -302,6 +306,7 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
     retainedCustomers: allRetained.length,
     custRetention: allEligible.length ? allRetained.length / allEligible.length : 0,
     writtenPremium: agencyWritten,
+    writtenAnnualized: agencyWrittenAnnualized,
     activePremium: agencyActive,
     activeWritten: agencyActiveWritten,
     writtenPremRetention: agencyEligibleWritten ? agencyActiveWritten / agencyEligibleWritten : 0,
