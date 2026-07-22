@@ -8,7 +8,18 @@ export default function UnmatchedTable({ results, salesOverrides, onApplyOverrid
   // Every result whose sale.id has an override applied — regardless of whether
   // the correction is still unmatched or now matches. Lets the user revert
   // wrong corrections that already flowed out of the unmatched queue.
-  const correctedRows = results.filter(r => salesOverrides?.[r.sale.id]);
+  // Capped to the 5 most-recent corrections (sorted by override.updatedAt);
+  // older ones are still saved in KV but not surfaced here so the section
+  // doesn't grow unbounded.
+  const RECENT_LIMIT = 5;
+  const correctedRows = results
+    .filter(r => salesOverrides?.[r.sale.id])
+    .map(r => ({ r, ts: salesOverrides[r.sale.id]?.updatedAt || '' }))
+    .sort((a, b) => b.ts.localeCompare(a.ts))
+    .slice(0, RECENT_LIMIT)
+    .map(x => x.r);
+
+  const overrideCountTotal = Object.keys(salesOverrides || {}).length;
 
   const startEdit = (sale) => {
     setEditingId(sale.id);
@@ -51,7 +62,10 @@ export default function UnmatchedTable({ results, salesOverrides, onApplyOverrid
 
       {correctedRows.length > 0 && (
         <div className="p-4 border-b border-slate-200">
-          <div className="text-xs font-semibold text-slate-600 mb-2">APPLIED CORRECTIONS ({correctedRows.length})</div>
+          <div className="text-xs font-semibold text-slate-600 mb-2">
+            RECENT CORRECTIONS ({correctedRows.length}
+            {overrideCountTotal > RECENT_LIMIT && <span className="text-slate-400 font-normal"> of {overrideCountTotal} saved</span>})
+          </div>
           <table className="w-full text-xs">
             <thead className="text-slate-500 text-left">
               <tr>

@@ -204,12 +204,17 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
 
   const producerRows = [];
   for (const p of producers.values()) {
-    const eligible = p.customers.filter(c => c.eligible);
+    // Eligible = tenure >= 31 days AND at least one sale matched into the
+    // master. Unmatched customers get excluded (Option A per Frank 2026-07-22)
+    // because we can't honestly measure their retention either way.
+    const eligible = p.customers.filter(c => c.eligible && !c.allUnmatched);
     const retained = eligible.filter(c => c.retained);
     const writtenPremium = p.customers.reduce((s, c) => s + c.writtenPremium, 0);
     const activePremium = eligible.reduce((s, c) => s + c.activePremium, 0);
     const activeWritten = eligible.reduce((s, c) => s + c.activeWritten, 0);
     const eligibleWritten = eligible.reduce((s, c) => s + c.writtenPremium, 0);
+    const excludedNew = p.customers.filter(c => !c.eligible).length;
+    const excludedUnmatched = p.customers.filter(c => c.eligible && c.allUnmatched).length;
     // Annualized-at-bind denominator (from Policy Master via match). Used for
     // annualized retention so 6mo↔12mo term differences don't distort.
     const eligibleWrittenAnnualized = eligible.reduce((s, c) => s + c.writtenAnnualized, 0);
@@ -236,7 +241,8 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
       isAdmin: p.isAdmin,
       totalCustomers: p.customers.length,
       eligibleCustomers: eligible.length,
-      excludedNew: p.customers.length - eligible.length,
+      excludedNew,
+      excludedUnmatched,
       retainedCustomers: retained.length,
       writtenPremium,
       activePremium,
@@ -270,20 +276,24 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
     );
   }
 
-  // Agency-level roll-up (excludes admins from leaderboard but the customers
-  // are still real business — include them in the agency KPIs).
-  const allEligible = customerStats.filter(c => c.eligible);
+  // Agency-level roll-up. Same eligibility rule as producer rows: tenure >=31
+  // days AND at least one sale matched. Unmatched customers are excluded
+  // rather than counted as automatic losses.
+  const allEligible = customerStats.filter(c => c.eligible && !c.allUnmatched);
   const allRetained = allEligible.filter(c => c.retained);
   const agencyWritten = customerStats.reduce((s, c) => s + c.writtenPremium, 0);
   const agencyEligibleWritten = allEligible.reduce((s, c) => s + c.writtenPremium, 0);
   const agencyEligibleWrittenAnnualized = allEligible.reduce((s, c) => s + c.writtenAnnualized, 0);
   const agencyActive = allEligible.reduce((s, c) => s + c.activePremium, 0);
   const agencyActiveWritten = allEligible.reduce((s, c) => s + c.activeWritten, 0);
+  const agencyExcludedNew = customerStats.filter(c => !c.eligible).length;
+  const agencyExcludedUnmatched = customerStats.filter(c => c.eligible && c.allUnmatched).length;
 
   const agency = {
     totalCustomers: customerStats.length,
     eligibleCustomers: allEligible.length,
-    excludedNew: customerStats.length - allEligible.length,
+    excludedNew: agencyExcludedNew,
+    excludedUnmatched: agencyExcludedUnmatched,
     retainedCustomers: allRetained.length,
     custRetention: allEligible.length ? allRetained.length / allEligible.length : 0,
     writtenPremium: agencyWritten,
@@ -291,7 +301,6 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
     activeWritten: agencyActiveWritten,
     writtenPremRetention: agencyEligibleWritten ? agencyActiveWritten / agencyEligibleWritten : 0,
     annualizedPremRetention: agencyEligibleWrittenAnnualized ? agencyActive / agencyEligibleWrittenAnnualized : 0,
-    unmatchedCustomers: customerStats.filter(c => c.allUnmatched).length,
   };
 
   return {

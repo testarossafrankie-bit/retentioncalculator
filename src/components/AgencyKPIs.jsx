@@ -51,8 +51,8 @@ export default function AgencyKPIs({ agency }) {
       />
       <Card
         label="Excluded"
-        value={agency.excludedNew + agency.unmatchedCustomers}
-        sub={`${agency.excludedNew} < 31 days · ${agency.unmatchedCustomers} unmatched`}
+        value={agency.excludedNew + agency.excludedUnmatched}
+        sub={`${agency.excludedNew} < 31 days · ${agency.excludedUnmatched} unmatched`}
         tone="amber"
       />
     </div>
