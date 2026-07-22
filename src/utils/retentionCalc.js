@@ -156,6 +156,17 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
     const retained = activePremium > 0
       || (!c.applicantId && c.salesRows.some(r => r.status === 'retained'));
 
+    // Flash-cancel: every one of this customer's matched period policies
+    // cancelled within `minTenureDays` of its effective date. Signals non-pay,
+    // buyer's remorse, or a quote-to-cancel — not real churn. If ANY period
+    // policy stuck past the threshold, the customer isn't a flash cancel.
+    const matchedPolicies = c.salesRows.map(r => r.policyMatch).filter(Boolean);
+    const isFlashCancel = matchedPolicies.length > 0 && matchedPolicies.every(pm => {
+      if (!pm.isCancelled) return false;
+      if (!pm.effectiveDate || !pm.cancellationDate) return false;
+      return daysBetween(pm.effectiveDate, pm.cancellationDate) < minTenureDays;
+    });
+
     const eligible = tenureDays >= minTenureDays;
 
     // Any sale in the period marked isRewrite=true means we should also flag
@@ -176,6 +187,7 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
       firstEffDate: firstEff,
       tenureDays,
       eligible,
+      isFlashCancel,
       retained,
       hasRewriteInPeriod,
       writtenPremium,
@@ -204,10 +216,11 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
 
   const producerRows = [];
   for (const p of producers.values()) {
-    // Eligible = tenure >= 31 days AND at least one sale matched into the
-    // master. Unmatched customers get excluded (Option A per Frank 2026-07-22)
-    // because we can't honestly measure their retention either way.
-    const eligible = p.customers.filter(c => c.eligible && !c.allUnmatched);
+    // Eligible = tenure >= threshold AND matched into the master AND NOT a
+    // flash cancel (all period policies cancelled within threshold days).
+    // Unmatched and flash cancels are excluded because they don't measure
+    // real retention — data hygiene / non-pay noise respectively.
+    const eligible = p.customers.filter(c => c.eligible && !c.allUnmatched && !c.isFlashCancel);
     const retained = eligible.filter(c => c.retained);
     const writtenPremium = p.customers.reduce((s, c) => s + c.writtenPremium, 0);
     // Annualized-at-bind version of writtenPremium — sums across ALL of the
@@ -219,6 +232,7 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
     const eligibleWritten = eligible.reduce((s, c) => s + c.writtenPremium, 0);
     const excludedNew = p.customers.filter(c => !c.eligible).length;
     const excludedUnmatched = p.customers.filter(c => c.eligible && c.allUnmatched).length;
+    const excludedFlashCancel = p.customers.filter(c => c.eligible && !c.allUnmatched && c.isFlashCancel).length;
     // Annualized-at-bind denominator (from Policy Master via match). Used for
     // annualized retention so 6mo↔12mo term differences don't distort.
     const eligibleWrittenAnnualized = eligible.reduce((s, c) => s + c.writtenAnnualized, 0);
@@ -247,6 +261,7 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
       eligibleCustomers: eligible.length,
       excludedNew,
       excludedUnmatched,
+      excludedFlashCancel,
       retainedCustomers: retained.length,
       writtenPremium,
       writtenAnnualized: writtenAnnualizedAll,
@@ -281,10 +296,8 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
     );
   }
 
-  // Agency-level roll-up. Same eligibility rule as producer rows: tenure >=31
-  // days AND at least one sale matched. Unmatched customers are excluded
-  // rather than counted as automatic losses.
-  const allEligible = customerStats.filter(c => c.eligible && !c.allUnmatched);
+  // Agency-level roll-up. Same eligibility rule as producer rows.
+  const allEligible = customerStats.filter(c => c.eligible && !c.allUnmatched && !c.isFlashCancel);
   const allRetained = allEligible.filter(c => c.retained);
   const agencyWritten = customerStats.reduce((s, c) => s + c.writtenPremium, 0);
   // Annualized-at-bind across ALL customers (matches leaderboard's Written Ann
@@ -297,12 +310,14 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
   const agencyActiveWritten = allEligible.reduce((s, c) => s + c.activeWritten, 0);
   const agencyExcludedNew = customerStats.filter(c => !c.eligible).length;
   const agencyExcludedUnmatched = customerStats.filter(c => c.eligible && c.allUnmatched).length;
+  const agencyExcludedFlashCancel = customerStats.filter(c => c.eligible && !c.allUnmatched && c.isFlashCancel).length;
 
   const agency = {
     totalCustomers: customerStats.length,
     eligibleCustomers: allEligible.length,
     excludedNew: agencyExcludedNew,
     excludedUnmatched: agencyExcludedUnmatched,
+    excludedFlashCancel: agencyExcludedFlashCancel,
     retainedCustomers: allRetained.length,
     custRetention: allEligible.length ? allRetained.length / allEligible.length : 0,
     writtenPremium: agencyWritten,

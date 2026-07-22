@@ -164,9 +164,9 @@ export default function ProducerLeaderboard({ producers, showAdmins, onToggleAdm
                       {p.canonical}
                       {p.isAdmin && <span className="ml-2 text-xs text-slate-500">(admin)</span>}
                     </td>
-                    <td className="text-right px-3 py-2" title={`Eligible ${p.eligibleCustomers} · <31d ${p.excludedNew} · unmatched ${p.excludedUnmatched}`}>
+                    <td className="text-right px-3 py-2" title={`Eligible ${p.eligibleCustomers} · too new ${p.excludedNew} · unmatched ${p.excludedUnmatched} · flash cancel ${p.excludedFlashCancel}`}>
                       {p.eligibleCustomers}
-                      {(p.excludedNew + p.excludedUnmatched) > 0 && <span className="text-slate-400 text-xs"> +{p.excludedNew + p.excludedUnmatched}</span>}
+                      {(p.excludedNew + p.excludedUnmatched + p.excludedFlashCancel) > 0 && <span className="text-slate-400 text-xs"> +{p.excludedNew + p.excludedUnmatched + p.excludedFlashCancel}</span>}
                     </td>
                     <td className="text-right px-3 py-2">{fmt$(p.writtenPremium)}</td>
                     <td className="text-right px-3 py-2">{fmt$(p.writtenAnnualized)}</td>
@@ -201,7 +201,7 @@ export default function ProducerLeaderboard({ producers, showAdmins, onToggleAdm
       </div>
       <div className="p-3 bg-slate-50 border-t border-slate-200 text-xs text-slate-500">
         Score = 30% Written Prem + 30% Cust Retention + 20% Annualized Prem Retention + 10% Bundle % + 10% Avg Prem.
-        <strong>Wr Prem Ret</strong> compares same-term dollars (like-to-like, matches your production reports). <strong>Ann Prem Ret</strong> normalizes both sides to 12mo so carrier mix doesn't distort. Written / Avg premium are scaled to the top peer. "+N" next to Customers = excluded from retention (&lt;31d tenure OR unmatched in master); hover the number for the split.
+        <strong>Wr Prem Ret</strong> compares same-term dollars (like-to-like, matches your production reports). <strong>Ann Prem Ret</strong> normalizes both sides to 12mo so carrier mix doesn't distort. Written / Avg premium are scaled to the top peer. "+N" next to Customers = excluded from retention (too new tenure, unmatched in master, or flash cancel &lt; threshold); hover for the split.
       </div>
     </div>
   );

@@ -137,16 +137,18 @@ export default function Controls({
           </select>
         </div>
         <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1">Exclude new customers</label>
+          <label className="block text-xs font-semibold text-slate-600 mb-1" title="Excludes both super-new customers and flash cancels (in-force less than N days)">
+            Exclude cases under
+          </label>
           <select
             value={minTenureDays}
             onChange={e => onMinTenureDaysChange(Number(e.target.value))}
             className="w-full border border-slate-300 rounded px-3 py-2 text-sm"
           >
             <option value={0}>None (include all)</option>
-            <option value={31}>Under 31 days</option>
-            <option value={60}>Under 60 days</option>
-            <option value={90}>Under 90 days</option>
+            <option value={31}>31 days</option>
+            <option value={60}>60 days</option>
+            <option value={90}>90 days</option>
           </select>
         </div>
       </div>
