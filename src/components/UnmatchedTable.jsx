@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export default function UnmatchedTable({ results, salesOverrides, onApplyOverride, onClearOverride }) {
+export default function UnmatchedTable({ results, salesOverrides, onApplyOverride, onClearOverride, saveState }) {
   const rows = results.filter(r => r.status === 'unmatched');
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState({});
@@ -34,12 +34,14 @@ export default function UnmatchedTable({ results, salesOverrides, onApplyOverrid
         <div className="text-sm text-slate-200 flex items-center gap-3">
           <span>{rows.length} unmatched</span>
           {overrideCount > 0 && (
-            <span className="text-emerald-300">· {overrideCount} correction{overrideCount === 1 ? '' : 's'} applied</span>
+            <span className="text-emerald-300">· {overrideCount} correction{overrideCount === 1 ? '' : 's'} saved</span>
           )}
+          {saveState === 'saving' && <span className="text-blue-300">· saving…</span>}
+          {saveState === 'error' && <span className="text-rose-300">· save failed — check console</span>}
         </div>
       </div>
       <div className="p-4 text-sm text-slate-600 bg-amber-50 border-b border-amber-200">
-        Click the pencil to edit a row's Policy #, Customer Name, or Carrier. Corrections are applied to this session only — they re-run the match immediately. To make the fix permanent, update the sales log entry in the FBI Portal.
+        Click the pencil to edit a row's Policy #, Customer Name, or Carrier. Corrections save to the shared KV (persist across sessions and users) as override records — the underlying sales log entry stays untouched. Use ↺ to revert.
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

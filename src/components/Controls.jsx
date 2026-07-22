@@ -16,6 +16,7 @@ export default function Controls({
   loading, error,
   onPresetSelect, activePreset,
   teamLoaded,
+  uploadedAt, pmSaveState,
 }) {
   const fileRef = useRef();
   const [dragOver, setDragOver] = useState(false);
@@ -66,7 +67,10 @@ export default function Controls({
             className="w-full border border-slate-300 rounded px-3 py-2 text-sm" />
         </div>
         <div className="md:col-span-2">
-          <label className="block text-xs font-semibold text-slate-600 mb-1">Book of Business (.xlsx)</label>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">
+            Book of Business (.xlsx)
+            {fileName && <span className="ml-2 font-normal text-slate-400">— {uploadedAt ? `saved ${new Date(uploadedAt).toLocaleString()}` : 'not yet saved'}</span>}
+          </label>
           <input
             type="file"
             accept=".xlsx,.xls"
@@ -87,9 +91,9 @@ export default function Controls({
                   ? 'border-emerald-400 bg-emerald-50 text-emerald-900'
                   : 'border-slate-300 hover:bg-slate-50'
             }`}
-            title="Click to choose or drop an .xlsx file"
+            title="Click to choose or drop an .xlsx file to replace the current one"
           >
-            {fileName ? `✓ ${fileName}` : dragOver ? 'Drop the file to load…' : 'Click or drag & drop .xlsx'}
+            {fileName ? `✓ ${fileName} · click to replace` : dragOver ? 'Drop the file to load…' : 'Click or drag & drop .xlsx'}
           </div>
         </div>
       </div>
@@ -101,6 +105,8 @@ export default function Controls({
           {teamLoaded ? '✓ team roster loaded' : 'loading team roster…'}
         </div>
         {loading && <div className="text-blue-600">Loading sales…</div>}
+        {pmSaveState === 'saving' && <div className="text-blue-600">Saving Policy Master…</div>}
+        {pmSaveState === 'error' && <div className="text-rose-700">Policy Master save failed — file usable this session, but won't persist</div>}
         {error && <div className="text-rose-700">Error: {error}</div>}
       </div>
 

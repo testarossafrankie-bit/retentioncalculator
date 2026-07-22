@@ -5,7 +5,7 @@ import AgencyKPIs from '../components/AgencyKPIs.jsx';
 import ProducerLeaderboard from '../components/ProducerLeaderboard.jsx';
 import UnmatchedTable from '../components/UnmatchedTable.jsx';
 import BypassTokenPanel from '../components/BypassTokenPanel.jsx';
-import { fetchSales, fetchTeamMembers } from '../services/api.js';
+import { fetchSales, fetchTeamMembers, fetchOverrides, saveOverrides, fetchPolicyMaster, savePolicyMaster, expandPolicyMaster } from '../services/api.js';
 import { parsePolicyMaster } from '../utils/policyMasterParse.js';
 import { computeRetention } from '../utils/retentionCalc.js';
 import { buildProducerResolver } from '../utils/producerAliases.js';
@@ -34,6 +34,8 @@ export default function Retention() {
 
   const [policyMaster, setPolicyMaster] = useState(null);
   const [fileName, setFileName] = useState('');
+  const [uploadedAt, setUploadedAt] = useState(null);
+  const [pmSaveState, setPmSaveState] = useState('idle'); // 'idle' | 'saving' | 'error'
 
   const [dateField, setDateField] = useState('effDate');
   const [preset, setPreset] = useState('last-full-month');
@@ -44,20 +46,65 @@ export default function Retention() {
   const [tab, setTab] = useState('leaderboard');
   const [showAdmins, setShowAdmins] = useState(false);
 
-  // Session-only corrections for unmatched sales — keyed by sale.id, values
-  // are partial sale overrides ({ policyNum, customerName, carrier }). Applied
-  // before the match runs so a corrected row can move out of "unmatched".
+  // Corrections for unmatched sales — persisted to KV under `retention_overrides`.
+  // Keyed by sale.id, applied before matching so a corrected row moves out of
+  // "unmatched" as soon as the fix is saved.
   const [salesOverrides, setSalesOverrides] = useState({});
-  const applyOverride = (id, patch) => setSalesOverrides(o => ({ ...o, [id]: patch }));
-  const clearOverride = (id) => setSalesOverrides(o => { const n = { ...o }; delete n[id]; return n; });
+  const [saveState, setSaveState] = useState('idle'); // 'idle' | 'saving' | 'error'
+
+  const persistOverrides = async (nextMap) => {
+    setSaveState('saving');
+    try {
+      await saveOverrides(Object.values(nextMap));
+      setSaveState('idle');
+    } catch (e) {
+      console.error('[overrides] save failed', e);
+      setSaveState('error');
+    }
+  };
+
+  const applyOverride = (id, patch) => {
+    setSalesOverrides(o => {
+      const next = { ...o, [id]: { id, ...patch, updatedAt: new Date().toISOString() } };
+      persistOverrides(next);
+      return next;
+    });
+  };
+
+  const clearOverride = (id) => {
+    setSalesOverrides(o => {
+      const next = { ...o };
+      delete next[id];
+      persistOverrides(next);
+      return next;
+    });
+  };
 
   const loadRemote = async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [salesData, teamData] = await Promise.all([fetchSales(), fetchTeamMembers()]);
+      const [salesData, teamData, overridesData, savedMaster] = await Promise.all([
+        fetchSales(), fetchTeamMembers(), fetchOverrides(), fetchPolicyMaster(),
+      ]);
       setSales(Array.isArray(salesData) ? salesData.filter(s => !s.deleted) : []);
       setTeam(Array.isArray(teamData) ? teamData : []);
+      const map = {};
+      for (const o of overridesData) if (o?.id) map[o.id] = o;
+      setSalesOverrides(map);
+      if (savedMaster) {
+        const expanded = expandPolicyMaster(savedMaster);
+        // Rebuild the byApplicantId index (Maps don't survive JSON).
+        const byApplicantId = new Map();
+        for (const p of expanded.policies) {
+          if (!p.applicantId) continue;
+          if (!byApplicantId.has(p.applicantId)) byApplicantId.set(p.applicantId, []);
+          byApplicantId.get(p.applicantId).push(p);
+        }
+        setPolicyMaster({ policies: expanded.policies, byApplicantId, filterMeta: expanded.filterMeta });
+        setFileName(expanded.fileName || '');
+        setUploadedAt(expanded.uploadedAt || null);
+      }
     } catch (e) {
       setLoadError(e.message || 'Failed to load data');
     } finally {
@@ -79,12 +126,35 @@ export default function Retention() {
   const handleFileUpload = async (file) => {
     setFileName(file.name);
     const buf = await file.arrayBuffer();
-    setPolicyMaster(parsePolicyMaster(buf));
+    const parsed = parsePolicyMaster(buf);
+    setPolicyMaster(parsed);
+    // Persist to KV so refresh doesn't require re-upload. Save is fire-and-
+    // forget from the user's POV — if it fails, the file still works this
+    // session; a warning appears in the controls row.
+    setPmSaveState('saving');
+    const now = new Date().toISOString();
+    setUploadedAt(now);
+    try {
+      await savePolicyMaster({
+        fileName: file.name,
+        filterMeta: parsed.filterMeta,
+        policies: parsed.policies,
+      });
+      setPmSaveState('idle');
+    } catch (e) {
+      console.error('[policy master] save failed', e);
+      setPmSaveState('error');
+    }
   };
 
   const policyMasterMeta = useMemo(() => {
     if (!policyMaster) return null;
-    return { dateRange: parseFilterDateRange(policyMaster.filterMeta.dateRange) };
+    // Only surface a range if the export was actually date-filtered. EZLynx
+    // still fills in the Date Range cell (as the report-generation window)
+    // even when Date Select is "No Date Filter" — don't warn in that case.
+    const dateField = policyMaster.filterMeta?.dateField;
+    const isFiltered = dateField && String(dateField).toLowerCase() !== 'no date filter';
+    return { dateRange: isFiltered ? parseFilterDateRange(policyMaster.filterMeta.dateRange) : null };
   }, [policyMaster]);
 
   const salesInRange = useMemo(() => {
@@ -126,6 +196,8 @@ export default function Retention() {
           onPresetSelect={handlePreset}
           activePreset={preset}
           teamLoaded={!loading && team.length > 0}
+          uploadedAt={uploadedAt}
+          pmSaveState={pmSaveState}
         />
 
         {loadError && (
@@ -172,6 +244,7 @@ export default function Retention() {
                 salesOverrides={salesOverrides}
                 onApplyOverride={applyOverride}
                 onClearOverride={clearOverride}
+                saveState={saveState}
               />
             )}
           </>

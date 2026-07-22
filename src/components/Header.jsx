@@ -8,7 +8,7 @@ export default function Header() {
         </div>
         <div className="text-right text-xs text-slate-300">
           <div>Sales Log ↔ EZLynx Book of Business</div>
-          <div>Session-only · upload each visit</div>
+          <div>Policy Master + corrections persist in KV</div>
         </div>
       </div>
     </header>
