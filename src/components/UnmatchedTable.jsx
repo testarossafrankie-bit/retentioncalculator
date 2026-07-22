@@ -5,6 +5,11 @@ export default function UnmatchedTable({ results, salesOverrides, onApplyOverrid
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState({});
 
+  // Every result whose sale.id has an override applied — regardless of whether
+  // the correction is still unmatched or now matches. Lets the user revert
+  // wrong corrections that already flowed out of the unmatched queue.
+  const correctedRows = results.filter(r => salesOverrides?.[r.sale.id]);
+
   const startEdit = (sale) => {
     setEditingId(sale.id);
     setDraft({
@@ -43,6 +48,50 @@ export default function UnmatchedTable({ results, salesOverrides, onApplyOverrid
       <div className="p-4 text-sm text-slate-600 bg-amber-50 border-b border-amber-200">
         Click the pencil to edit a row's Policy #, Customer Name, or Carrier. Corrections save to the shared KV (persist across sessions and users) as override records — the underlying sales log entry stays untouched. Use ↺ to revert.
       </div>
+
+      {correctedRows.length > 0 && (
+        <div className="p-4 border-b border-slate-200">
+          <div className="text-xs font-semibold text-slate-600 mb-2">APPLIED CORRECTIONS ({correctedRows.length})</div>
+          <table className="w-full text-xs">
+            <thead className="text-slate-500 text-left">
+              <tr>
+                <th className="px-2 py-1">Customer</th>
+                <th className="px-2 py-1">Corrected Policy #</th>
+                <th className="px-2 py-1">Carrier</th>
+                <th className="px-2 py-1">Current Status</th>
+                <th className="px-2 py-1">Matched Master Row</th>
+                <th className="px-2 py-1 text-right">Revert</th>
+              </tr>
+            </thead>
+            <tbody>
+              {correctedRows.map(r => (
+                <tr key={r.sale.id} className="border-t border-slate-100">
+                  <td className="px-2 py-1">{r.sale.customerName}</td>
+                  <td className="px-2 py-1 font-mono">{r.sale.policyNum}</td>
+                  <td className="px-2 py-1">{r.sale.carrier}</td>
+                  <td className="px-2 py-1">
+                    {r.status === 'retained' && <span className="text-emerald-700">retained</span>}
+                    {r.status === 'cancelled' && <span className="text-rose-700">cancelled</span>}
+                    {r.status === 'unmatched' && <span className="text-amber-700">still unmatched</span>}
+                  </td>
+                  <td className="px-2 py-1">
+                    {r.policyMatch ? `${r.policyMatch.accountName} · ${r.policyMatch.lob}` : '—'}
+                  </td>
+                  <td className="px-2 py-1 text-right">
+                    <button
+                      onClick={() => onClearOverride(r.sale.id)}
+                      className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded hover:bg-rose-200 text-xs"
+                      title="Revert this correction"
+                    >
+                      ↺ Revert
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-slate-700 text-left">
