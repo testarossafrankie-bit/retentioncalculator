@@ -51,6 +51,7 @@ export default function Retention() {
   const [showAdmins, setShowAdmins] = useState(false);
   const [carrierFilter, setCarrierFilter] = useState('all');
   const [producerFilter, setProducerFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState('all');
 
   // Corrections for unmatched sales — persisted to KV under `retention_overrides`.
   // Keyed by sale.id, applied before matching so a corrected row moves out of
@@ -223,15 +224,27 @@ export default function Retention() {
     return Array.from(set).sort();
   }, [salesInDateRange, resolveProducer]);
 
+  // Sources come straight from the sales log's `source` field. Trim whitespace
+  // so "Chevy" and "Chevy " don't show up as separate options.
+  const availableSources = useMemo(() => {
+    const set = new Set();
+    for (const s of salesInDateRange) {
+      const v = String(s.source || '').trim();
+      if (v) set.add(v);
+    }
+    return Array.from(set).sort();
+  }, [salesInDateRange]);
+
   const salesInRange = useMemo(() => {
     const filtered = salesInDateRange.filter(s => {
       if (carrierFilter !== 'all' && canonicalCarrier(s.carrier) !== carrierFilter) return false;
       if (producerFilter !== 'all' && resolveProducer(s.agent || '').canonical !== producerFilter) return false;
+      if (sourceFilter !== 'all' && String(s.source || '').trim() !== sourceFilter) return false;
       return true;
     });
     // Apply session-only corrections from the Unmatched cleanup UI
     return filtered.map(s => salesOverrides[s.id] ? { ...s, ...salesOverrides[s.id] } : s);
-  }, [salesInDateRange, salesOverrides, carrierFilter, producerFilter, resolveProducer]);
+  }, [salesInDateRange, salesOverrides, carrierFilter, producerFilter, sourceFilter, resolveProducer]);
 
   // Raw match results — before user confirmations/rejections.
   const rawMatchResults = useMemo(() => {
@@ -289,6 +302,9 @@ export default function Retention() {
           producerFilter={producerFilter}
           onProducerFilterChange={setProducerFilter}
           availableProducers={availableProducers}
+          sourceFilter={sourceFilter}
+          onSourceFilterChange={setSourceFilter}
+          availableSources={availableSources}
         />
 
         {loadError && (

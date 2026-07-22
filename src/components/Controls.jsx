@@ -19,6 +19,7 @@ export default function Controls({
   uploadedAt, pmSaveState,
   carrierFilter, onCarrierFilterChange, availableCarriers,
   producerFilter, onProducerFilterChange, availableProducers,
+  sourceFilter, onSourceFilterChange, availableSources,
 }) {
   const fileRef = useRef();
   const [dragOver, setDragOver] = useState(false);
@@ -123,10 +124,21 @@ export default function Controls({
             {availableProducers.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
-        {(carrierFilter !== 'all' || producerFilter !== 'all') && (
-          <div className="md:col-span-2 flex items-end">
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Source</label>
+          <select
+            value={sourceFilter}
+            onChange={e => onSourceFilterChange(e.target.value)}
+            className="w-full border border-slate-300 rounded px-3 py-2 text-sm"
+          >
+            <option value="all">All sources</option>
+            {availableSources.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        {(carrierFilter !== 'all' || producerFilter !== 'all' || sourceFilter !== 'all') && (
+          <div className="flex items-end">
             <button
-              onClick={() => { onCarrierFilterChange('all'); onProducerFilterChange('all'); }}
+              onClick={() => { onCarrierFilterChange('all'); onProducerFilterChange('all'); onSourceFilterChange('all'); }}
               className="text-xs text-slate-500 hover:text-slate-700 underline"
             >
               Clear filters
