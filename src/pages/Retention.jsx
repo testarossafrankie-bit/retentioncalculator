@@ -4,15 +4,18 @@ import Controls from '../components/Controls.jsx';
 import AgencyKPIs from '../components/AgencyKPIs.jsx';
 import ProducerLeaderboard from '../components/ProducerLeaderboard.jsx';
 import UnmatchedTable from '../components/UnmatchedTable.jsx';
+import MatchReviewTable from '../components/MatchReviewTable.jsx';
 import BypassTokenPanel from '../components/BypassTokenPanel.jsx';
-import { fetchSales, fetchTeamMembers, fetchOverrides, saveOverrides, fetchPolicyMaster, savePolicyMaster, expandPolicyMaster } from '../services/api.js';
+import { fetchSales, fetchTeamMembers, fetchOverrides, saveOverrides, fetchPolicyMaster, savePolicyMaster, expandPolicyMaster, fetchMatchDecisions, saveMatchDecisions } from '../services/api.js';
 import { parsePolicyMaster } from '../utils/policyMasterParse.js';
+import { matchSales } from '../utils/match.js';
 import { computeRetention } from '../utils/retentionCalc.js';
 import { buildProducerResolver } from '../utils/producerAliases.js';
 import { inRange, priorMonthRange, parseFilterDateRange, iso } from '../utils/dateRange.js';
 
 const TABS = [
   { id: 'leaderboard', label: 'Producer Leaderboard' },
+  { id: 'reviews', label: 'Match Reviews' },
   { id: 'unmatched', label: 'Unmatched Cleanup' },
 ];
 
@@ -63,6 +66,33 @@ export default function Retention() {
     }
   };
 
+  // Confirm/reject decisions on loose matches (anything except policy-exact).
+  // Rejected sales fall back to unmatched; confirmed ones get a badge but no
+  // math change. Persisted under `retention_match_decisions`.
+  const [matchDecisions, setMatchDecisions] = useState({}); // saleId → 'confirm'|'reject'
+  const [decisionSaveState, setDecisionSaveState] = useState('idle');
+
+  const persistDecisions = async (nextMap) => {
+    setDecisionSaveState('saving');
+    try {
+      await saveMatchDecisions(Object.entries(nextMap).map(([id, decision]) => ({ id, decision, updatedAt: new Date().toISOString() })));
+      setDecisionSaveState('idle');
+    } catch (e) {
+      console.error('[decisions] save failed', e);
+      setDecisionSaveState('error');
+    }
+  };
+
+  const setDecision = (saleId, decision) => {
+    setMatchDecisions(m => {
+      const next = { ...m };
+      if (!decision) delete next[saleId];
+      else next[saleId] = decision;
+      persistDecisions(next);
+      return next;
+    });
+  };
+
   const applyOverride = (id, patch) => {
     setSalesOverrides(o => {
       const next = { ...o, [id]: { id, ...patch, updatedAt: new Date().toISOString() } };
@@ -84,14 +114,17 @@ export default function Retention() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [salesData, teamData, overridesData, savedMaster] = await Promise.all([
-        fetchSales(), fetchTeamMembers(), fetchOverrides(), fetchPolicyMaster(),
+      const [salesData, teamData, overridesData, savedMaster, decisionsData] = await Promise.all([
+        fetchSales(), fetchTeamMembers(), fetchOverrides(), fetchPolicyMaster(), fetchMatchDecisions(),
       ]);
       setSales(Array.isArray(salesData) ? salesData.filter(s => !s.deleted) : []);
       setTeam(Array.isArray(teamData) ? teamData : []);
       const map = {};
       for (const o of overridesData) if (o?.id) map[o.id] = o;
       setSalesOverrides(map);
+      const dmap = {};
+      for (const d of decisionsData) if (d?.id && d?.decision) dmap[d.id] = d.decision;
+      setMatchDecisions(dmap);
       if (savedMaster) {
         const expanded = expandPolicyMaster(savedMaster);
         // Rebuild the byApplicantId index (Maps don't survive JSON).
@@ -165,15 +198,32 @@ export default function Retention() {
 
   const resolveProducer = useMemo(() => buildProducerResolver(team), [team]);
 
-  const computation = useMemo(() => {
+  // Raw match results — before user confirmations/rejections.
+  const rawMatchResults = useMemo(() => {
     if (!policyMaster) return null;
+    return matchSales(salesInRange, policyMaster.policies);
+  }, [policyMaster, salesInRange]);
+
+  // Applied decisions: 'reject' forces unmatched; 'confirm' just flags for UI.
+  const matchResults = useMemo(() => {
+    if (!rawMatchResults) return null;
+    return rawMatchResults.map(r => {
+      const decision = matchDecisions[r.sale.id];
+      if (decision === 'reject') {
+        return { ...r, status: 'unmatched', policyMatch: null, matchMethod: 'user-rejected', decision };
+      }
+      return { ...r, decision };
+    });
+  }, [rawMatchResults, matchDecisions]);
+
+  const computation = useMemo(() => {
+    if (!policyMaster || !matchResults) return null;
     return computeRetention({
-      sales: salesInRange,
-      policies: policyMaster.policies,
+      matchResults,
       byApplicantId: policyMaster.byApplicantId,
       resolveProducer,
     });
-  }, [policyMaster, salesInRange, resolveProducer]);
+  }, [policyMaster, matchResults, resolveProducer]);
 
   const showResults = computation && !loading;
 
@@ -236,6 +286,14 @@ export default function Retention() {
                 producers={computation.producerRows}
                 showAdmins={showAdmins}
                 onToggleAdmins={setShowAdmins}
+              />
+            )}
+            {tab === 'reviews' && (
+              <MatchReviewTable
+                matchResults={computation.matchResults}
+                decisions={matchDecisions}
+                onSetDecision={setDecision}
+                saveState={decisionSaveState}
               />
             )}
             {tab === 'unmatched' && (

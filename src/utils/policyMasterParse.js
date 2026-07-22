@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { canonicalCarrier, canonicalLOB, normalizeName, normalizePolicyNum, normalizeProducer } from './normalize.js';
+import { canonicalCarrier, canonicalLOB, normalizeName, normalizePhone, normalizePolicyNum, normalizeProducer } from './normalize.js';
 
 const CANCEL_TX_TYPES = new Set(['cancel conf', 'cancel rewrite']);
 
@@ -39,6 +39,7 @@ export function parsePolicyMaster(arrayBuffer) {
       applicantId: String(pickCol(r, 'Applicant ID') || '').trim(),
       accountName: String(pickCol(r, 'Account Name') || '').trim(),
       accountNameNorm: normalizeName(pickCol(r, 'Account Name')),
+      phone: normalizePhone(pickCol(r, 'Phone - Home')),
       producer: String(pickCol(r, 'Assigned Producer') || '').trim(),
       producerNorm: normalizeProducer(pickCol(r, 'Assigned Producer')),
       lob: canonicalLOB(pickCol(r, 'Line Of Business')),

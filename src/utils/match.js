@@ -1,38 +1,68 @@
 import { boundedLevenshtein } from './levenshtein.js';
-import { canonicalCarrier, canonicalLOB, normalizeName, normalizePolicyNum, normalizeProducer } from './normalize.js';
+import { canonicalCarrier, canonicalLOB, lastNameOf, normalizeName, normalizePhone, normalizePolicyNum } from './normalize.js';
 
 const FUZZY_POLICY_MAX_EDITS = 2;
 
 function buildPolicyIndex(policies) {
   const byPolicyNum = new Map();
-  const byNameCarrier = new Map();
+  const byName = new Map();               // nameNorm → policies[]
+  const byNameToAids = new Map();         // nameNorm → Set<applicantId>
+  const byNameCarrier = new Map();        // `${name}|${carrier}` → policies[]
+  const byPhoneLastName = new Map();      // `${phone}|${lastName}` → policies[]
   const allPolicyNums = [];
+
   for (const p of policies) {
     if (p.policyNumberNorm) {
       if (!byPolicyNum.has(p.policyNumberNorm)) byPolicyNum.set(p.policyNumberNorm, []);
       byPolicyNum.get(p.policyNumberNorm).push(p);
       allPolicyNums.push(p.policyNumberNorm);
     }
-    if (p.accountNameNorm && p.carrier) {
-      const key = `${p.accountNameNorm}|${p.carrier.toLowerCase()}`;
-      if (!byNameCarrier.has(key)) byNameCarrier.set(key, []);
-      byNameCarrier.get(key).push(p);
+
+    if (p.accountNameNorm) {
+      if (!byName.has(p.accountNameNorm)) byName.set(p.accountNameNorm, []);
+      byName.get(p.accountNameNorm).push(p);
+
+      if (p.applicantId) {
+        if (!byNameToAids.has(p.accountNameNorm)) byNameToAids.set(p.accountNameNorm, new Set());
+        byNameToAids.get(p.accountNameNorm).add(p.applicantId);
+      }
+
+      if (p.carrier) {
+        const nc = `${p.accountNameNorm}|${p.carrier.toLowerCase()}`;
+        if (!byNameCarrier.has(nc)) byNameCarrier.set(nc, []);
+        byNameCarrier.get(nc).push(p);
+      }
+
+      if (p.phone) {
+        const ln = lastNameOf(p.accountNameNorm);
+        if (ln) {
+          const hk = `${p.phone}|${ln}`;
+          if (!byPhoneLastName.has(hk)) byPhoneLastName.set(hk, []);
+          byPhoneLastName.get(hk).push(p);
+        }
+      }
     }
   }
-  return { byPolicyNum, byNameCarrier, allPolicyNums };
+  return { byPolicyNum, byName, byNameToAids, byNameCarrier, byPhoneLastName, allPolicyNums };
 }
 
-function pickBestOfMatches(matches) {
-  // If a customer has both a cancelled and an active version of the same policy
-  // (e.g., cancel then rewrite), prefer the active one for retention purposes.
-  const active = matches.find(m => !m.isCancelled);
-  return active || matches[0];
+// Score-and-pick: prefer active > same LOB > same carrier > first.
+function pickBestMatch(candidates, { lob, carrier } = {}) {
+  if (!candidates || !candidates.length) return null;
+  let best = null, bestScore = -1;
+  for (const p of candidates) {
+    let s = 0;
+    if (p.isActive) s += 100;
+    if (lob && p.lob === lob) s += 10;
+    if (carrier && String(p.carrier || '').toLowerCase() === carrier) s += 5;
+    if (s > bestScore) { bestScore = s; best = p; }
+  }
+  return best;
 }
 
-function fuzzyPolicyMatch(needle, allPolicyNums, byPolicyNum) {
+function fuzzyPolicyMatch(needle, allPolicyNums, byPolicyNum, ctx) {
   if (!needle || needle.length < 6) return null;
-  let best = null;
-  let bestDist = FUZZY_POLICY_MAX_EDITS + 1;
+  let best = null, bestDist = FUZZY_POLICY_MAX_EDITS + 1;
   for (const cand of allPolicyNums) {
     if (Math.abs(cand.length - needle.length) > FUZZY_POLICY_MAX_EDITS) continue;
     const d = boundedLevenshtein(needle, cand, FUZZY_POLICY_MAX_EDITS);
@@ -43,20 +73,7 @@ function fuzzyPolicyMatch(needle, allPolicyNums, byPolicyNum) {
     }
   }
   if (!best) return null;
-  return { match: pickBestOfMatches(byPolicyNum.get(best)), method: `fuzzy-policy(d=${bestDist})` };
-}
-
-function nameCarrierMatch(sale, byNameCarrier) {
-  const nameKey = normalizeName(sale.customerName);
-  const carrierKey = canonicalCarrier(sale.carrier).toLowerCase();
-  if (!nameKey || !carrierKey) return null;
-  const bucket = byNameCarrier.get(`${nameKey}|${carrierKey}`);
-  if (!bucket || !bucket.length) return null;
-  // Prefer same LOB where possible
-  const saleLob = canonicalLOB(sale.policyType);
-  const byLob = bucket.filter(p => p.lob === saleLob);
-  const chosen = byLob.length ? pickBestOfMatches(byLob) : pickBestOfMatches(bucket);
-  return { match: chosen, method: 'name+carrier' };
+  return { match: pickBestMatch(byPolicyNum.get(best), ctx), method: `fuzzy-policy(d=${bestDist})` };
 }
 
 export function matchSales(sales, policies) {
@@ -64,28 +81,76 @@ export function matchSales(sales, policies) {
   const results = [];
 
   for (const sale of sales) {
-    const saleNorm = normalizePolicyNum(sale.policyNum);
+    const policyNorm = normalizePolicyNum(sale.policyNum);
+    const nameKey = normalizeName(sale.customerName);
+    const carrierKey = canonicalCarrier(sale.carrier).toLowerCase();
+    const lobKey = canonicalLOB(sale.policyType);
+    const phoneKey = normalizePhone(sale.phone);
+    const ctx = { lob: lobKey, carrier: carrierKey };
+
     let matchResult = null;
 
-    if (saleNorm) {
-      const exact = idx.byPolicyNum.get(saleNorm);
-      if (exact) matchResult = { match: pickBestOfMatches(exact), method: 'exact-policy' };
+    // 1. Exact policy #
+    if (policyNorm && idx.byPolicyNum.has(policyNorm)) {
+      matchResult = { match: pickBestMatch(idx.byPolicyNum.get(policyNorm), ctx), method: 'policy-exact' };
     }
-    if (!matchResult && saleNorm) {
-      matchResult = fuzzyPolicyMatch(saleNorm, idx.allPolicyNums, idx.byPolicyNum);
+
+    // 1b. Fuzzy policy # (kept between exact and applicant-id lookups — a
+    //     typo in policy # is more informative than a name coincidence).
+    if (!matchResult && policyNorm) {
+      matchResult = fuzzyPolicyMatch(policyNorm, idx.allPolicyNums, idx.byPolicyNum, ctx);
     }
-    if (!matchResult) {
-      matchResult = nameCarrierMatch(sale, idx.byNameCarrier);
+
+    // 2. Applicant ID via unique name — if the customer's name maps to exactly
+    //    one Applicant ID in the master, use it. Rewrites and cross-carrier
+    //    moves are common enough that policy # is often stale; name is stable.
+    if (!matchResult && nameKey) {
+      const aids = idx.byNameToAids.get(nameKey);
+      if (aids && aids.size === 1) {
+        const [onlyAid] = aids;
+        const nameHits = idx.byName.get(nameKey) || [];
+        const forAid = nameHits.filter(p => p.applicantId === onlyAid);
+        const picked = pickBestMatch(forAid, ctx);
+        if (picked) matchResult = { match: picked, method: 'applicant-id-via-name' };
+      }
+    }
+
+    // 3. Customer name (normalized) alone. Falls through if name has multiple
+    //    Applicant IDs — picks the best one by carrier/LOB/active heuristic.
+    if (!matchResult && nameKey) {
+      const nameHits = idx.byName.get(nameKey);
+      if (nameHits && nameHits.length) {
+        const picked = pickBestMatch(nameHits, ctx);
+        if (picked) matchResult = { match: picked, method: 'name-normalized' };
+      }
+    }
+
+    // 4. Name + Carrier + LOB — tightened version of the old name+carrier
+    //    fallback. LOB-first pick gives the closest business match.
+    if (!matchResult && nameKey && carrierKey) {
+      const bucket = idx.byNameCarrier.get(`${nameKey}|${carrierKey}`);
+      if (bucket && bucket.length) {
+        const byLob = bucket.filter(p => p.lob === lobKey);
+        const picked = pickBestMatch(byLob.length ? byLob : bucket, ctx);
+        if (picked) matchResult = { match: picked, method: 'name+carrier+lob' };
+      }
+    }
+
+    // 5. Household — same phone + same last name. Catches spouses/kids on
+    //    the same policy where the sale is booked under a different first name.
+    if (!matchResult && phoneKey && nameKey) {
+      const ln = lastNameOf(nameKey);
+      const bucket = ln ? idx.byPhoneLastName.get(`${phoneKey}|${ln}`) : null;
+      if (bucket && bucket.length) {
+        const picked = pickBestMatch(bucket, ctx);
+        if (picked) matchResult = { match: picked, method: 'household' };
+      }
     }
 
     let status;
-    if (!matchResult) {
-      status = 'unmatched';
-    } else if (matchResult.match.isCancelled) {
-      status = 'cancelled';
-    } else {
-      status = 'retained';
-    }
+    if (!matchResult) status = 'unmatched';
+    else if (matchResult.match.isCancelled) status = 'cancelled';
+    else status = 'retained';
 
     results.push({
       sale,
@@ -96,45 +161,4 @@ export function matchSales(sales, policies) {
   }
 
   return results;
-}
-
-// Customer-level rollup using Applicant ID from Policy Master where available,
-// falling back to normalized customer name on the sales-log side.
-export function rollupCustomers(matchResults, byApplicantId) {
-  const customers = new Map();
-
-  const bucketKey = (r) => {
-    const applicantId = r.policyMatch?.applicantId;
-    if (applicantId) return `aid:${applicantId}`;
-    return `name:${normalizeName(r.sale.customerName)}`;
-  };
-
-  for (const r of matchResults) {
-    const key = bucketKey(r);
-    if (!customers.has(key)) {
-      customers.set(key, {
-        key,
-        applicantId: r.policyMatch?.applicantId || null,
-        displayName: r.sale.customerName || r.policyMatch?.accountName || '',
-        salesRows: [],
-        anyRetained: false,
-      });
-    }
-    const c = customers.get(key);
-    c.salesRows.push(r);
-    if (r.status === 'retained') c.anyRetained = true;
-  }
-
-  // For customers matched into an Applicant ID, they're retained if ANY of that
-  // Applicant ID's policies in the Policy Master is active — even ones not on
-  // our sales log (renewals of pre-existing business we didn't write).
-  for (const c of customers.values()) {
-    if (c.applicantId && byApplicantId.has(c.applicantId)) {
-      const anyPolicyActive = byApplicantId.get(c.applicantId).some(p => p.isActive);
-      if (anyPolicyActive) c.anyRetained = true;
-    }
-    c.status = c.anyRetained ? 'retained' : 'lost';
-  }
-
-  return Array.from(customers.values());
 }

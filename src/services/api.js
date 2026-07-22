@@ -51,14 +51,30 @@ export async function fetchOverrides() {
   return Array.isArray(data) ? data : [];
 }
 
+export async function saveMatchDecisions(decisions) {
+  const res = await fetch(buildUrl('retention_match_decisions', { mode: 'replace' }), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(decisions),
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`Save failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchMatchDecisions() {
+  const data = await get('retention_match_decisions');
+  return Array.isArray(data) ? data : [];
+}
+
 // Persist the current Policy Master to KV under `retention_policy_master` so
 // Frank doesn't re-upload each visit. The full parsed structure is ~3MB per
 // 5,400 policies (too big for one KV value), so we trim to just the fields
 // used downstream and use short keys to squeeze under Upstash's ~1MB limit.
-const SLIM_KEYS = { a: 'applicantId', n: 'accountName', p: 'policyNumber', c: 'carrier', l: 'lob', ap: 'annualPremium', wp: 'writtenPremium', ed: 'effectiveDate', cd: 'cancellationDate', x: 'isCancelled' };
+const SLIM_KEYS = { a: 'applicantId', n: 'accountName', p: 'policyNumber', c: 'carrier', l: 'lob', ap: 'annualPremium', wp: 'writtenPremium', ed: 'effectiveDate', cd: 'cancellationDate', x: 'isCancelled', ph: 'phone' };
 
 function trimPolicy(p) {
-  return { a: p.applicantId, n: p.accountName, p: p.policyNumber, c: p.carrier, l: p.lob, ap: p.annualPremium, wp: p.writtenPremium, ed: p.effectiveDate, cd: p.cancellationDate, x: p.isCancelled };
+  return { a: p.applicantId, n: p.accountName, p: p.policyNumber, c: p.carrier, l: p.lob, ap: p.annualPremium, wp: p.writtenPremium, ed: p.effectiveDate, cd: p.cancellationDate, x: p.isCancelled, ph: p.phone };
 }
 
 function expandPolicy(s) {

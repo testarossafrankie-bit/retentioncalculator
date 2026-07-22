@@ -3,6 +3,25 @@ export function normalizePolicyNum(v) {
   return String(v).toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+// Phone normalization for household matching. Strip everything but digits and
+// keep the last 10 (drops leading 1 for US numbers). Returns '' if we can't
+// get to 10 digits — matching on 7 digits gives too many false hits.
+export function normalizePhone(v) {
+  if (v == null) return '';
+  const digits = String(v).replace(/\D/g, '');
+  if (digits.length < 10) return '';
+  return digits.slice(-10);
+}
+
+// Last "word" of a normalized name. "john q public" → "public". Used with
+// phone for the household match — a spouse+kid usually share last name +
+// phone but not first name.
+export function lastNameOf(nameNorm) {
+  if (!nameNorm) return '';
+  const parts = String(nameNorm).trim().split(/\s+/);
+  return parts[parts.length - 1] || '';
+}
+
 export function normalizeName(v) {
   if (v == null) return '';
   return String(v).toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();

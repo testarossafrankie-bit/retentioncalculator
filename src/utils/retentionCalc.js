@@ -1,5 +1,4 @@
-import { matchSales } from './match.js';
-import { normalizeName, canonicalCarrier, canonicalLOB } from './normalize.js';
+import { normalizeName } from './normalize.js';
 import { toISO } from './dateRange.js';
 
 const MIN_TENURE_DAYS = 31;
@@ -25,11 +24,15 @@ function num(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-// Compute per-producer + agency stats given: matched sales in period, policy
-// master, resolver, and today's date (defaults to now).
-export function computeRetention({ sales, policies, byApplicantId, resolveProducer, today = new Date() }) {
+// Compute per-producer + agency stats.
+// Inputs:
+//   matchResults    — output of matchSales(), post-processed by any user
+//                     match decisions (confirm/reject) in the caller.
+//   byApplicantId   — Applicant ID → policies map (from Policy Master).
+//   resolveProducer — canonicalizer for producer names.
+//   today           — reference date for tenure exclusion.
+export function computeRetention({ matchResults, byApplicantId, resolveProducer, today = new Date() }) {
   const todayISO = toISO(today.toISOString());
-  const matchResults = matchSales(sales, policies);
 
   // Group matchResults by customer (across NB + rewrites for the same person).
   const customers = new Map();
