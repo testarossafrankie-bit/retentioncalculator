@@ -20,6 +20,7 @@ export default function Controls({
   carrierFilter, onCarrierFilterChange, availableCarriers,
   producerFilter, onProducerFilterChange, availableProducers,
   sourceFilter, onSourceFilterChange, availableSources,
+  minTenureDays, onMinTenureDaysChange,
 }) {
   const fileRef = useRef();
   const [dragOver, setDragOver] = useState(false);
@@ -135,17 +136,31 @@ export default function Controls({
             {availableSources.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-        {(carrierFilter !== 'all' || producerFilter !== 'all' || sourceFilter !== 'all') && (
-          <div className="flex items-end">
-            <button
-              onClick={() => { onCarrierFilterChange('all'); onProducerFilterChange('all'); onSourceFilterChange('all'); }}
-              className="text-xs text-slate-500 hover:text-slate-700 underline"
-            >
-              Clear filters
-            </button>
-          </div>
-        )}
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Exclude new customers</label>
+          <select
+            value={minTenureDays}
+            onChange={e => onMinTenureDaysChange(Number(e.target.value))}
+            className="w-full border border-slate-300 rounded px-3 py-2 text-sm"
+          >
+            <option value={0}>None (include all)</option>
+            <option value={31}>Under 31 days</option>
+            <option value={60}>Under 60 days</option>
+            <option value={90}>Under 90 days</option>
+          </select>
+        </div>
       </div>
+
+      {(carrierFilter !== 'all' || producerFilter !== 'all' || sourceFilter !== 'all') && (
+        <div className="mt-2">
+          <button
+            onClick={() => { onCarrierFilterChange('all'); onProducerFilterChange('all'); onSourceFilterChange('all'); }}
+            className="text-xs text-slate-500 hover:text-slate-700 underline"
+          >
+            Clear filters
+          </button>
+        </div>
+      )}
 
       <div className="mt-4 flex flex-wrap gap-4 text-sm text-slate-600">
         <div><span className="font-semibold text-slate-800">{salesCount}</span> sales in range</div>

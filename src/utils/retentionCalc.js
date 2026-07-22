@@ -1,8 +1,6 @@
 import { canonicalLOB, normalizeName } from './normalize.js';
 import { toISO } from './dateRange.js';
 
-const MIN_TENURE_DAYS = 31;
-
 function daysBetween(aISO, bISO) {
   if (!aISO || !bISO) return 0;
   const a = new Date(aISO).getTime();
@@ -31,7 +29,9 @@ function num(v) {
 //   byApplicantId   — Applicant ID → policies map (from Policy Master).
 //   resolveProducer — canonicalizer for producer names.
 //   today           — reference date for tenure exclusion.
-export function computeRetention({ matchResults, byApplicantId, resolveProducer, today = new Date() }) {
+//   minTenureDays   — customers whose earliest period sale is < this many
+//                     days old are excluded from retention. 0 = include all.
+export function computeRetention({ matchResults, byApplicantId, resolveProducer, today = new Date(), minTenureDays = 31 }) {
   const todayISO = toISO(today.toISOString());
 
   // Group matchResults by customer (across NB + rewrites for the same person).
@@ -156,7 +156,7 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
     const retained = activePremium > 0
       || (!c.applicantId && c.salesRows.some(r => r.status === 'retained'));
 
-    const eligible = tenureDays >= MIN_TENURE_DAYS;
+    const eligible = tenureDays >= minTenureDays;
 
     // Any sale in the period marked isRewrite=true means we should also flag
     // this customer as having received a rewrite treatment.

@@ -52,6 +52,7 @@ export default function Retention() {
   const [carrierFilter, setCarrierFilter] = useState('all');
   const [producerFilter, setProducerFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
+  const [minTenureDays, setMinTenureDays] = useState(31);
 
   // Corrections for unmatched sales — persisted to KV under `retention_overrides`.
   // Keyed by sale.id, applied before matching so a corrected row moves out of
@@ -270,8 +271,9 @@ export default function Retention() {
       matchResults,
       byApplicantId: policyMaster.byApplicantId,
       resolveProducer,
+      minTenureDays,
     });
-  }, [policyMaster, matchResults, resolveProducer]);
+  }, [policyMaster, matchResults, resolveProducer, minTenureDays]);
 
   const showResults = computation && !loading;
 
@@ -305,6 +307,8 @@ export default function Retention() {
           sourceFilter={sourceFilter}
           onSourceFilterChange={setSourceFilter}
           availableSources={availableSources}
+          minTenureDays={minTenureDays}
+          onMinTenureDaysChange={setMinTenureDays}
         />
 
         {loadError && (
