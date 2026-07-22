@@ -1,6 +1,19 @@
+// Sales-log-side prefixes that don't appear on the Policy Master. Progressive
+// Property policies are booked with a "PRG" prefix in the sales log but the
+// EZLynx master stores the bare policy number. Strip them so both sides can
+// match. Add carrier prefixes here as we find them.
+const STRIPPABLE_PREFIXES = ['prg'];
+
 export function normalizePolicyNum(v) {
   if (v == null) return '';
-  return String(v).toLowerCase().replace(/[^a-z0-9]/g, '');
+  let s = String(v).toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const prefix of STRIPPABLE_PREFIXES) {
+    if (s.startsWith(prefix)) {
+      s = s.slice(prefix.length);
+      break;
+    }
+  }
+  return s;
 }
 
 // Phone normalization for household matching. Strip everything but digits and
