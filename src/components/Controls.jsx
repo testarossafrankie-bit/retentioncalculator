@@ -17,6 +17,8 @@ export default function Controls({
   onPresetSelect, activePreset,
   teamLoaded,
   uploadedAt, pmSaveState,
+  carrierFilter, onCarrierFilterChange, availableCarriers,
+  producerFilter, onProducerFilterChange, availableProducers,
 }) {
   const fileRef = useRef();
   const [dragOver, setDragOver] = useState(false);
@@ -96,6 +98,41 @@ export default function Controls({
             {fileName ? `✓ ${fileName} · click to replace` : dragOver ? 'Drop the file to load…' : 'Click or drag & drop .xlsx'}
           </div>
         </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Carrier</label>
+          <select
+            value={carrierFilter}
+            onChange={e => onCarrierFilterChange(e.target.value)}
+            className="w-full border border-slate-300 rounded px-3 py-2 text-sm"
+          >
+            <option value="all">All carriers</option>
+            {availableCarriers.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Producer</label>
+          <select
+            value={producerFilter}
+            onChange={e => onProducerFilterChange(e.target.value)}
+            className="w-full border border-slate-300 rounded px-3 py-2 text-sm"
+          >
+            <option value="all">All producers</option>
+            {availableProducers.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        {(carrierFilter !== 'all' || producerFilter !== 'all') && (
+          <div className="md:col-span-2 flex items-end">
+            <button
+              onClick={() => { onCarrierFilterChange('all'); onProducerFilterChange('all'); }}
+              className="text-xs text-slate-500 hover:text-slate-700 underline"
+            >
+              Clear filters
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 flex flex-wrap gap-4 text-sm text-slate-600">

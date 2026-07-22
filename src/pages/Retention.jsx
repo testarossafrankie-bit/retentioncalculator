@@ -12,7 +12,7 @@ import { matchSales } from '../utils/match.js';
 import { computeRetention } from '../utils/retentionCalc.js';
 import { buildProducerResolver } from '../utils/producerAliases.js';
 import { inRange, priorMonthRange, parseFilterDateRange, iso } from '../utils/dateRange.js';
-import { isDisregardedCarrier } from '../utils/normalize.js';
+import { canonicalCarrier, isDisregardedCarrier } from '../utils/normalize.js';
 
 const TABS = [
   { id: 'leaderboard', label: 'Producer Leaderboard' },
@@ -49,6 +49,8 @@ export default function Retention() {
 
   const [tab, setTab] = useState('leaderboard');
   const [showAdmins, setShowAdmins] = useState(false);
+  const [carrierFilter, setCarrierFilter] = useState('all');
+  const [producerFilter, setProducerFilter] = useState('all');
 
   // Corrections for unmatched sales — persisted to KV under `retention_overrides`.
   // Keyed by sale.id, applied before matching so a corrected row moves out of
@@ -191,16 +193,45 @@ export default function Retention() {
     return { dateRange: isFiltered ? parseFilterDateRange(policyMaster.filterMeta.dateRange) : null };
   }, [policyMaster]);
 
-  const salesInRange = useMemo(() => {
-    const filtered = sales.filter(s =>
+  const resolveProducer = useMemo(() => buildProducerResolver(team), [team]);
+
+  // Sales in the current date window (before carrier/producer filters). This
+  // is the option universe for the dropdowns — narrowing the date range
+  // refreshes the available carrier/producer options.
+  const salesInDateRange = useMemo(() => {
+    return sales.filter(s =>
       inRange(s[dateField], start, end) &&
       !isDisregardedCarrier(s.carrier)
     );
+  }, [sales, dateField, start, end]);
+
+  const availableCarriers = useMemo(() => {
+    const set = new Set();
+    for (const s of salesInDateRange) {
+      const c = canonicalCarrier(s.carrier);
+      if (c) set.add(c);
+    }
+    return Array.from(set).sort();
+  }, [salesInDateRange]);
+
+  const availableProducers = useMemo(() => {
+    const set = new Set();
+    for (const s of salesInDateRange) {
+      const p = resolveProducer(s.agent || '').canonical;
+      if (p && p !== '(unknown)') set.add(p);
+    }
+    return Array.from(set).sort();
+  }, [salesInDateRange, resolveProducer]);
+
+  const salesInRange = useMemo(() => {
+    const filtered = salesInDateRange.filter(s => {
+      if (carrierFilter !== 'all' && canonicalCarrier(s.carrier) !== carrierFilter) return false;
+      if (producerFilter !== 'all' && resolveProducer(s.agent || '').canonical !== producerFilter) return false;
+      return true;
+    });
     // Apply session-only corrections from the Unmatched cleanup UI
     return filtered.map(s => salesOverrides[s.id] ? { ...s, ...salesOverrides[s.id] } : s);
-  }, [sales, dateField, start, end, salesOverrides]);
-
-  const resolveProducer = useMemo(() => buildProducerResolver(team), [team]);
+  }, [salesInDateRange, salesOverrides, carrierFilter, producerFilter, resolveProducer]);
 
   // Raw match results — before user confirmations/rejections.
   const rawMatchResults = useMemo(() => {
@@ -252,6 +283,12 @@ export default function Retention() {
           teamLoaded={!loading && team.length > 0}
           uploadedAt={uploadedAt}
           pmSaveState={pmSaveState}
+          carrierFilter={carrierFilter}
+          onCarrierFilterChange={setCarrierFilter}
+          availableCarriers={availableCarriers}
+          producerFilter={producerFilter}
+          onProducerFilterChange={setProducerFilter}
+          availableProducers={availableProducers}
         />
 
         {loadError && (
