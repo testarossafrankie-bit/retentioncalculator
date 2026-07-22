@@ -1,4 +1,4 @@
-import { normalizeName } from './normalize.js';
+import { canonicalLOB, normalizeName } from './normalize.js';
 import { toISO } from './dateRange.js';
 
 const MIN_TENURE_DAYS = 31;
@@ -70,24 +70,14 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
     // because it's the production number Frank reports on.
     const writtenPremium = c.salesRows.reduce((s, r) => s + num(r.sale.premium), 0);
 
-    // Written ANNUALIZED premium — for each sale we matched into the master,
-    // use the master's annualPremium instead. This normalizes 6mo↔12mo so
-    // premium retention (below) is apples-to-apples with active premium.
-    // Unmatched sales contribute 0 here (they'll skew retention if included).
-    const writtenAnnualized = c.salesRows.reduce((s, r) =>
-      s + (r.policyMatch ? r.policyMatch.annualPremium : 0), 0);
-
-    // Active premium — cohort-scoped.
-    //   activePremium / activeWritten track ONLY the policies this producer
-    //   wrote in the period (or their rewrites) that are still active today.
-    //   NOT the customer's full book, because that would credit the producer
-    //   for pre-existing or later-added policies they didn't write.
-    //
-    // Cohort rules:
-    //   (1) Any period-matched policy that is still active → counted.
-    //   (2) For each period-matched policy that was cancelled, look for an
-    //       active policy tied to the same Applicant ID in the same LOB
-    //       (rewrite candidate) and count that once as the replacement.
+    // Active premium — cohort-scoped, LOB-aware.
+    //   For strict-match sales (policy-exact, fuzzy-policy, name+carrier+lob)
+    //   the picked master row IS the sale's policy — use it directly.
+    //   For loose-match sales (applicant-id-via-name, name-only, household)
+    //   the picked master row is only customer identification, NOT this
+    //   sale's policy. Look up an active same-LOB policy for that customer
+    //   instead; if none, the sale contributes 0 (correct — we can't
+    //   pretend an auto policy stands in for a cancelled renters sale).
     const bookPolicies = c.applicantId ? (byApplicantId.get(c.applicantId) || []) : [];
     const activeBookPolicies = bookPolicies.filter(p => p.isActive);
     const activePolicyCount = activeBookPolicies.length; // used for bundle % (whole book)
@@ -99,41 +89,64 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
     );
     const usedRewriteNorms = new Set();
 
+    const strictMethod = (m) =>
+      m === 'policy-exact' || (m && m.startsWith('fuzzy-policy')) || m === 'name+carrier+lob';
+
     let activePremium = 0;
     let activeWritten = 0;
+    let writtenAnnualized = 0;
+
     for (const r of c.salesRows) {
       const pm = r.policyMatch;
       if (!pm) continue;
-      if (pm.isActive) {
-        activePremium += pm.annualPremium;
-        activeWritten += pm.writtenPremium;
-        continue;
+
+      const saleLob = canonicalLOB(r.sale.policyType);
+      const lobAligned = pm.lob === saleLob;
+      const trusted = lobAligned || strictMethod(r.matchMethod);
+
+      if (trusted) {
+        writtenAnnualized += pm.annualPremium;
+        if (pm.isActive) {
+          activePremium += pm.annualPremium;
+          activeWritten += pm.writtenPremium;
+        } else if (c.applicantId && pm.cancellationDate) {
+          // Cancelled — search for a rewrite candidate. Same LOB, effective
+          // on/after cancellation, within 90 days, closest premium wins.
+          const window = 90;
+          const eligibleCandidates = activeBookPolicies.filter(p =>
+            !cohortMatchedNorms.has(p.policyNumberNorm) &&
+            !usedRewriteNorms.has(p.policyNumberNorm) &&
+            p.lob === pm.lob &&
+            p.effectiveDate &&
+            p.effectiveDate >= pm.cancellationDate &&
+            daysBetween(pm.cancellationDate, p.effectiveDate) <= window
+          );
+          if (eligibleCandidates.length) {
+            eligibleCandidates.sort((a, b) =>
+              Math.abs(a.annualPremium - pm.annualPremium) - Math.abs(b.annualPremium - pm.annualPremium)
+            );
+            const cand = eligibleCandidates[0];
+            activePremium += cand.annualPremium;
+            activeWritten += cand.writtenPremium;
+            usedRewriteNorms.add(cand.policyNumberNorm);
+          }
+        }
+      } else {
+        // Loose match, LOB mismatch. Look for an active same-LOB policy for
+        // this customer to stand in as the "current state" of this sale.
+        const sameLobActive = activeBookPolicies.find(p =>
+          p.lob === saleLob &&
+          !cohortMatchedNorms.has(p.policyNumberNorm) &&
+          !usedRewriteNorms.has(p.policyNumberNorm)
+        );
+        if (sameLobActive) {
+          activePremium += sameLobActive.annualPremium;
+          activeWritten += sameLobActive.writtenPremium;
+          writtenAnnualized += sameLobActive.annualPremium;
+          usedRewriteNorms.add(sameLobActive.policyNumberNorm);
+        }
+        // else: sale contributes 0 to active AND annualized denominator.
       }
-      // Cancelled period policy — search for a rewrite candidate. A true
-      // rewrite: (1) same LOB, (2) effective date on or after the cancellation
-      // date, (3) within 90 days of cancellation (otherwise it's likely
-      // unrelated later business), (4) not one we already counted. When
-      // multiple candidates exist, prefer the one with premium closest to the
-      // cancelled policy — reduces the "grabbed an unrelated big policy"
-      // inflation bug.
-      if (!c.applicantId || !pm.cancellationDate) continue;
-      const window = 90;
-      const eligibleCandidates = activeBookPolicies.filter(p =>
-        !cohortMatchedNorms.has(p.policyNumberNorm) &&
-        !usedRewriteNorms.has(p.policyNumberNorm) &&
-        p.lob === pm.lob &&
-        p.effectiveDate &&
-        p.effectiveDate >= pm.cancellationDate &&
-        daysBetween(pm.cancellationDate, p.effectiveDate) <= window
-      );
-      if (!eligibleCandidates.length) continue;
-      eligibleCandidates.sort((a, b) =>
-        Math.abs(a.annualPremium - pm.annualPremium) - Math.abs(b.annualPremium - pm.annualPremium)
-      );
-      const candidate = eligibleCandidates[0];
-      activePremium += candidate.annualPremium;
-      activeWritten += candidate.writtenPremium;
-      usedRewriteNorms.add(candidate.policyNumberNorm);
     }
 
     // Cohort-scoped retention: retained if the producer's period-written
