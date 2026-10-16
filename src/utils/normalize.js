@@ -41,24 +41,50 @@ export function normalizeName(v) {
   return String(v).toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
 }
 
+// Business-entity suffixes to strip so "Pizza or Die" matches "Pizza or Die LLC".
+const ENTITY_SUFFIXES = /\s+(llc|l l c|inc|incorporated|corp|corporation|co|company|ltd|limited|pllc|lp|llp|pc|pa)\.?$/i;
+
+function stripEntitySuffix(s) {
+  let out = String(s || '').trim();
+  // Loop: handle "Pizza or Die LLC Inc" nested suffixes defensively.
+  for (let i = 0; i < 3; i++) {
+    const next = out.replace(ENTITY_SUFFIXES, '').trim();
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
 // Produce candidate names for a joint-applicant string.
 // "Jason Macsherry & Kathellen Robinson" → ["jason macsherry kathellen robinson",
 //   "jason macsherry", "kathellen robinson"].
-// " and " / "&" are the common joiners. The full normalized string is kept first
-// so single-applicant names (no splits) still work.
+// "Merlin & Mahogony Steele" → full + "merlin steele" + "mahogony steele" (first
+//   applicant inherits the last name from the second half when they share one).
+// " and " / "&" are the common joiners. Also strips LLC/Inc/Corp suffixes so
+// business entities line up across sales log and EZLynx.
 export function nameAliases(v) {
   if (v == null) return [];
-  const full = normalizeName(v);
+  const raw = stripEntitySuffix(v);
+  const full = normalizeName(raw);
   if (!full) return [];
   const aliases = new Set([full]);
-  // Split on " and " / "&" in the raw string before normalize so we don't
-  // split real names that happen to contain "and" as a substring (e.g.,
-  // "Andrea Smith"). Use word-boundary " and " / " & ".
-  const parts = String(v).split(/\s+(?:&|and)\s+/i);
+  const parts = String(raw).split(/\s+(?:&|and)\s+/i);
   if (parts.length > 1) {
-    for (const p of parts) {
-      const n = normalizeName(p);
-      if (n) aliases.add(n);
+    const norms = parts.map(p => normalizeName(p)).filter(Boolean);
+    for (const n of norms) aliases.add(n);
+    // Shared-last-name heuristic: "Merlin & Mahogony Steele" — first part has
+    // no last name (single token), second part has 2+ tokens. Generate the
+    // first-first + second-last combo as an extra alias.
+    if (norms.length === 2) {
+      const [a, b] = norms;
+      const aTokens = a.split(/\s+/);
+      const bTokens = b.split(/\s+/);
+      if (aTokens.length === 1 && bTokens.length >= 2) {
+        aliases.add(`${aTokens[0]} ${bTokens[bTokens.length - 1]}`);
+      }
+      if (bTokens.length === 1 && aTokens.length >= 2) {
+        aliases.add(`${bTokens[0]} ${aTokens[aTokens.length - 1]}`);
+      }
     }
   }
   return [...aliases];

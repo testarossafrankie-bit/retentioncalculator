@@ -19,18 +19,25 @@ function buildPolicyIndex(policies) {
     }
 
     if (p.accountNameNorm) {
-      if (!byName.has(p.accountNameNorm)) byName.set(p.accountNameNorm, []);
-      byName.get(p.accountNameNorm).push(p);
+      // Index under every name alias (joint-applicant splits, shared-last-name
+      // combos, entity-suffix-stripped). Prevents master-side names like
+      // "Marlee Harrison & Debbie Young" from being invisible when the sale is
+      // booked under just "Marlee Harrison".
+      const masterAliases = nameAliases(p.accountName);
+      for (const alias of masterAliases) {
+        if (!byName.has(alias)) byName.set(alias, []);
+        byName.get(alias).push(p);
 
-      if (p.applicantId) {
-        if (!byNameToAids.has(p.accountNameNorm)) byNameToAids.set(p.accountNameNorm, new Set());
-        byNameToAids.get(p.accountNameNorm).add(p.applicantId);
-      }
+        if (p.applicantId) {
+          if (!byNameToAids.has(alias)) byNameToAids.set(alias, new Set());
+          byNameToAids.get(alias).add(p.applicantId);
+        }
 
-      if (p.carrier) {
-        const nc = `${p.accountNameNorm}|${p.carrier.toLowerCase()}`;
-        if (!byNameCarrier.has(nc)) byNameCarrier.set(nc, []);
-        byNameCarrier.get(nc).push(p);
+        if (p.carrier) {
+          const nc = `${alias}|${p.carrier.toLowerCase()}`;
+          if (!byNameCarrier.has(nc)) byNameCarrier.set(nc, []);
+          byNameCarrier.get(nc).push(p);
+        }
       }
 
       if (p.phone) {
