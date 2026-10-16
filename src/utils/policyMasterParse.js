@@ -118,5 +118,26 @@ export function parsePolicyMaster(arrayBuffer) {
     byApplicantId.get(p.applicantId).push(p);
   }
 
+  // Diagnostic: expose column headers + cancellation-signal distribution so we
+  // can tell why isCancelled is or isn't firing. Readable in DevTools console.
+  if (typeof window !== 'undefined') {
+    const headerSample = rawRows[0] ? Object.keys(rawRows[0]) : [];
+    const uniq = (field) => {
+      const m = new Map();
+      for (const p of policies) m.set(p[field] || '(empty)', (m.get(p[field] || '(empty)') || 0) + 1);
+      return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15);
+    };
+    window.__pmDiag = {
+      rowCount: policies.length,
+      headers: headerSample,
+      cancellationDatePopulated: policies.filter(p => p.cancellationDate).length,
+      cancelledCount: policies.filter(p => p.isCancelled).length,
+      transactionTypes: uniq('transactionType'),
+      applicantStatuses: uniq('applicantStatus'),
+      policyStatuses: uniq('policyStatus'),
+    };
+    console.log('[PolicyMaster diag]', window.__pmDiag);
+  }
+
   return { policies, filterMeta, byApplicantId };
 }
