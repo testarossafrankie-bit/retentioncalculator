@@ -1,7 +1,14 @@
 import * as XLSX from 'xlsx';
 import { canonicalCarrier, canonicalLOB, normalizeName, normalizePhone, normalizePolicyNum, normalizeProducer } from './normalize.js';
 
-const CANCEL_TX_TYPES = new Set(['cancel conf', 'cancel rewrite']);
+const CANCEL_TX_TYPES = new Set([
+  'cancel confirmation',
+  'cancel conf',
+  'cancel rewrite',
+  'cancel req',
+  'non-renewal',
+  'nonrenewal',
+]);
 
 // EZLynx headers occasionally arrive with trailing spaces. Grab a value by
 // looking up any header whose trimmed form matches.
@@ -52,7 +59,9 @@ export function parsePolicyMaster(arrayBuffer) {
     const txType = String(pickCol(r, 'Transaction Type') || '').trim();
     const applicantStatus = String(pickCol(r, 'Applicant Status') || '').trim();
     const policyStatus = String(pickCol(r, 'Policy Status') || '').trim();
-    const cancellationDate = excelSerialToISO(pickCol(r, 'Policy Cancellation Date'));
+    const cancellationDate = excelSerialToISO(
+      pickCol(r, 'Cancellation Date') ?? pickCol(r, 'Policy Cancellation Date')
+    );
     // Authoritative cancellation signal: Policy Cancellation Date is populated,
     // OR Policy Status / Applicant Status reads cancelled/lost/non-renew,
     // OR Transaction Type matches a known cancel txn. Previously we trusted
