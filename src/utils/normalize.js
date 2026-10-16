@@ -41,6 +41,29 @@ export function normalizeName(v) {
   return String(v).toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
 }
 
+// Produce candidate names for a joint-applicant string.
+// "Jason Macsherry & Kathellen Robinson" → ["jason macsherry kathellen robinson",
+//   "jason macsherry", "kathellen robinson"].
+// " and " / "&" are the common joiners. The full normalized string is kept first
+// so single-applicant names (no splits) still work.
+export function nameAliases(v) {
+  if (v == null) return [];
+  const full = normalizeName(v);
+  if (!full) return [];
+  const aliases = new Set([full]);
+  // Split on " and " / "&" in the raw string before normalize so we don't
+  // split real names that happen to contain "and" as a substring (e.g.,
+  // "Andrea Smith"). Use word-boundary " and " / " & ".
+  const parts = String(v).split(/\s+(?:&|and)\s+/i);
+  if (parts.length > 1) {
+    for (const p of parts) {
+      const n = normalizeName(p);
+      if (n) aliases.add(n);
+    }
+  }
+  return [...aliases];
+}
+
 // Bridge "Last, First" (Policy Master) ↔ "First Last" (Sales Log).
 // Returns canonical "first last" lowercase, whitespace-collapsed.
 export function normalizeProducer(v) {
@@ -93,15 +116,28 @@ export function canonicalCarrier(v) {
   if (v == null) return '';
   const s = String(v).toLowerCase().trim();
   if (!s) return '';
+  // Safeco rebranded to Liberty Mutual in our sales log (2026-09-23) but EZLynx
+  // still writes "Safeco Insurance". Collapse both into one bucket so pre- and
+  // post-rebrand business line up with the Master.
+  if (s.includes('safeco') || s.includes('liberty mutual') || s === 'liberty') return 'Safeco';
   if (s.includes('progressive')) return 'Progressive';
   if (s.includes('travelers')) return 'Travelers';
-  if (s.includes('safeco')) return 'Safeco';
   if (s.includes('nationwide')) return 'Nationwide';
   if (s.includes('geico')) return 'Geico';
-  if (s.includes('american modern')) return 'American Modern';
+  // AMIG = American Modern Insurance Group. Sales log uses "Amig" / "AMIG".
+  if (s.includes('amig') || s.includes('american modern')) return 'American Modern';
   if (s.includes('hagerty')) return 'Hagerty';
   if (s.includes('foremost')) return 'Foremost';
-  if (s.includes('national general') || s === 'natgen') return 'National General';
+  // "NatGen 360" and "NatGenValue" are National General sub-brands.
+  if (s.includes('national general') || s.includes('natgen')) return 'National General';
+  if (s.includes('msa') || s.includes('main street america')) return 'MSA';
+  if (s.includes('metlife') || s.includes('met life')) return 'MetLife';
+  if (s.includes('openly')) return 'Openly';
+  if (s.includes('bristol')) return 'Bristol West';
+  if (s.includes('capitol')) return 'Capitol';
+  if (s.includes('utica')) return 'Utica First';
+  if (s.includes('western world')) return 'Western World';
+  if (s.includes('fire insurance exchange') || s.includes('farmers')) return 'Farmers';
   if (s.includes('mercury')) return 'Mercury';
   if (s.includes('branch')) return 'Branch';
   if (s.includes('kemper')) return 'Kemper';

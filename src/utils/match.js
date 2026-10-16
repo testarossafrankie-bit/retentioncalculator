@@ -1,5 +1,5 @@
 import { boundedLevenshtein } from './levenshtein.js';
-import { canonicalCarrier, canonicalLOB, lastNameOf, normalizeName, normalizePhone, normalizePolicyNum } from './normalize.js';
+import { canonicalCarrier, canonicalLOB, lastNameOf, nameAliases, normalizeName, normalizePhone, normalizePolicyNum } from './normalize.js';
 
 const FUZZY_POLICY_MAX_EDITS = 2;
 
@@ -83,6 +83,7 @@ export function matchSales(sales, policies) {
   for (const sale of sales) {
     const policyNorm = normalizePolicyNum(sale.policyNum);
     const nameKey = normalizeName(sale.customerName);
+    const nameAliasKeys = nameAliases(sale.customerName); // includes nameKey
     const carrierKey = canonicalCarrier(sale.carrier).toLowerCase();
     const lobKey = canonicalLOB(sale.policyType);
     const phoneKey = normalizePhone(sale.phone);
@@ -101,38 +102,73 @@ export function matchSales(sales, policies) {
       matchResult = fuzzyPolicyMatch(policyNorm, idx.allPolicyNums, idx.byPolicyNum, ctx);
     }
 
+    // 1c. Partial policy # — sales log often has a truncated or sub-policy
+    //     format (e.g., Travelers "615426302-700-1" vs master "615426302", or
+    //     an 8-digit stub vs 9-digit full). Try prefix match in either
+    //     direction, but only within the same canonical carrier so we don't
+    //     collide short digit stubs across different companies.
+    if (!matchResult && policyNorm && policyNorm.length >= 6) {
+      const sameCarrier = carrierKey
+        ? idx.allPolicyNums.filter(pn => {
+            const bucket = idx.byPolicyNum.get(pn);
+            return bucket && bucket.some(p => String(p.carrier || '').toLowerCase() === carrierKey);
+          })
+        : idx.allPolicyNums;
+      let picked = null;
+      let bestLenDelta = Infinity;
+      for (const pn of sameCarrier) {
+        if (pn === policyNorm) continue; // exact already tried
+        const isPrefix = pn.startsWith(policyNorm) || policyNorm.startsWith(pn);
+        if (!isPrefix) continue;
+        const delta = Math.abs(pn.length - policyNorm.length);
+        if (delta > 6) continue; // guardrail: don't match 6-char stub to a 13-char policy
+        if (delta < bestLenDelta) {
+          bestLenDelta = delta;
+          picked = pickBestMatch(idx.byPolicyNum.get(pn), ctx);
+        }
+      }
+      if (picked) matchResult = { match: picked, method: 'policy-partial' };
+    }
+
     // 2. Applicant ID via unique name — if the customer's name maps to exactly
     //    one Applicant ID in the master, use it. Rewrites and cross-carrier
     //    moves are common enough that policy # is often stale; name is stable.
-    if (!matchResult && nameKey) {
-      const aids = idx.byNameToAids.get(nameKey);
-      if (aids && aids.size === 1) {
-        const [onlyAid] = aids;
-        const nameHits = idx.byName.get(nameKey) || [];
-        const forAid = nameHits.filter(p => p.applicantId === onlyAid);
-        const picked = pickBestMatch(forAid, ctx);
-        if (picked) matchResult = { match: picked, method: 'applicant-id-via-name' };
+    //    Tries the full name AND each joint-applicant half.
+    if (!matchResult) {
+      for (const alias of nameAliasKeys) {
+        const aids = idx.byNameToAids.get(alias);
+        if (aids && aids.size === 1) {
+          const [onlyAid] = aids;
+          const nameHits = idx.byName.get(alias) || [];
+          const forAid = nameHits.filter(p => p.applicantId === onlyAid);
+          const picked = pickBestMatch(forAid, ctx);
+          if (picked) { matchResult = { match: picked, method: 'applicant-id-via-name' }; break; }
+        }
       }
     }
 
-    // 3. Customer name (normalized) alone. Falls through if name has multiple
-    //    Applicant IDs — picks the best one by carrier/LOB/active heuristic.
-    if (!matchResult && nameKey) {
-      const nameHits = idx.byName.get(nameKey);
-      if (nameHits && nameHits.length) {
-        const picked = pickBestMatch(nameHits, ctx);
-        if (picked) matchResult = { match: picked, method: 'name-normalized' };
+    // 3. Customer name (normalized) alone, including joint-applicant halves.
+    if (!matchResult) {
+      for (const alias of nameAliasKeys) {
+        const nameHits = idx.byName.get(alias);
+        if (nameHits && nameHits.length) {
+          const picked = pickBestMatch(nameHits, ctx);
+          if (picked) { matchResult = { match: picked, method: 'name-normalized' }; break; }
+        }
       }
     }
 
     // 4. Name + Carrier + LOB — tightened version of the old name+carrier
-    //    fallback. LOB-first pick gives the closest business match.
-    if (!matchResult && nameKey && carrierKey) {
-      const bucket = idx.byNameCarrier.get(`${nameKey}|${carrierKey}`);
-      if (bucket && bucket.length) {
-        const byLob = bucket.filter(p => p.lob === lobKey);
-        const picked = pickBestMatch(byLob.length ? byLob : bucket, ctx);
-        if (picked) matchResult = { match: picked, method: 'name+carrier+lob' };
+    //    fallback. LOB-first pick gives the closest business match. Tries
+    //    joint-applicant halves too.
+    if (!matchResult && carrierKey) {
+      for (const alias of nameAliasKeys) {
+        const bucket = idx.byNameCarrier.get(`${alias}|${carrierKey}`);
+        if (bucket && bucket.length) {
+          const byLob = bucket.filter(p => p.lob === lobKey);
+          const picked = pickBestMatch(byLob.length ? byLob : bucket, ctx);
+          if (picked) { matchResult = { match: picked, method: 'name+carrier+lob' }; break; }
+        }
       }
     }
 
