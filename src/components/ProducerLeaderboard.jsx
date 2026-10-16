@@ -55,7 +55,6 @@ function DetailPanel({ producer }) {
               <th className="text-right px-2 py-1">Active Ann</th>
               <th className="text-right px-2 py-1">Active Polys</th>
               <th className="text-center px-2 py-1">Rewrite?</th>
-              <th className="text-center px-2 py-1">Eligible?</th>
               <th className="text-center px-2 py-1">Retained?</th>
             </tr>
           </thead>
@@ -71,7 +70,6 @@ function DetailPanel({ producer }) {
                 <td className="text-right px-2 py-1">{fmt$(c.activePremium)}</td>
                 <td className="text-right px-2 py-1">{c.activePolicyCount}</td>
                 <td className="text-center px-2 py-1">{c.hasRewriteInPeriod ? '✓' : ''}</td>
-                <td className="text-center px-2 py-1">{c.eligible ? '✓' : <span className="text-slate-400">no</span>}</td>
                 <td className="text-center px-2 py-1">{c.retained ? <span className="text-emerald-700">✓</span> : <span className="text-rose-700">✗</span>}</td>
               </tr>
             ))}
@@ -164,9 +162,9 @@ export default function ProducerLeaderboard({ producers, showAdmins, onToggleAdm
                       {p.canonical}
                       {p.isAdmin && <span className="ml-2 text-xs text-slate-500">(admin)</span>}
                     </td>
-                    <td className="text-right px-3 py-2" title={`Eligible ${p.eligibleCustomers} · too new ${p.excludedNew} · unmatched ${p.excludedUnmatched} · flash cancel ${p.excludedFlashCancel}`}>
+                    <td className="text-right px-3 py-2" title={`Eligible ${p.eligibleCustomers} · unmatched ${p.excludedUnmatched} · flash cancel ${p.excludedFlashCancel}${p.excludedPreRenewal ? ` · pre-renewal ${p.excludedPreRenewal}` : ''}`}>
                       {p.eligibleCustomers}
-                      {(p.excludedNew + p.excludedUnmatched + p.excludedFlashCancel) > 0 && <span className="text-slate-400 text-xs"> +{p.excludedNew + p.excludedUnmatched + p.excludedFlashCancel}</span>}
+                      {(p.excludedUnmatched + p.excludedFlashCancel + (p.excludedPreRenewal || 0)) > 0 && <span className="text-slate-400 text-xs"> +{p.excludedUnmatched + p.excludedFlashCancel + (p.excludedPreRenewal || 0)}</span>}
                     </td>
                     <td className="text-right px-3 py-2">{fmt$(p.writtenPremium)}</td>
                     <td className="text-right px-3 py-2">{fmt$(p.writtenAnnualized)}</td>
@@ -201,7 +199,7 @@ export default function ProducerLeaderboard({ producers, showAdmins, onToggleAdm
       </div>
       <div className="p-3 bg-slate-50 border-t border-slate-200 text-xs text-slate-500">
         Score = 30% Written Prem + 30% Cust Retention + 20% Annualized Prem Retention + 10% Bundle % + 10% Avg Prem.
-        <strong>Wr Prem Ret</strong> compares same-term dollars (like-to-like, matches your production reports). <strong>Ann Prem Ret</strong> normalizes both sides to 12mo so carrier mix doesn't distort. Written / Avg premium are scaled to the top peer. "+N" next to Customers = excluded from retention (too new tenure, unmatched in master, or flash cancel &lt; threshold); hover for the split.
+        <strong>Wr Prem Ret</strong> compares same-term dollars (like-to-like, matches your production reports). <strong>Ann Prem Ret</strong> normalizes both sides to 12mo so carrier mix doesn't distort. Written / Avg premium are scaled to the top peer. "+N" next to Customers = excluded from retention (unmatched, flash cancel, or — when toggled — pre-renewal); hover for the split.
       </div>
     </div>
   );

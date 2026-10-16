@@ -5,6 +5,7 @@ import AgencyKPIs from '../components/AgencyKPIs.jsx';
 import ProducerLeaderboard from '../components/ProducerLeaderboard.jsx';
 import UnmatchedTable from '../components/UnmatchedTable.jsx';
 import MatchReviewTable from '../components/MatchReviewTable.jsx';
+import RenewalProjections from '../components/RenewalProjections.jsx';
 import BypassTokenPanel from '../components/BypassTokenPanel.jsx';
 import { fetchSales, fetchTeamMembers, fetchOverrides, saveOverrides, fetchPolicyMaster, savePolicyMaster, expandPolicyMaster, fetchMatchDecisions, saveMatchDecisions } from '../services/api.js';
 import { parsePolicyMaster } from '../utils/policyMasterParse.js';
@@ -16,6 +17,7 @@ import { canonicalCarrier, isDisregardedCarrier } from '../utils/normalize.js';
 
 const TABS = [
   { id: 'leaderboard', label: 'Producer Leaderboard' },
+  { id: 'projections', label: 'Renewal Projections' },
   { id: 'reviews', label: 'Match Reviews' },
   { id: 'unmatched', label: 'Unmatched Cleanup' },
 ];
@@ -52,7 +54,8 @@ export default function Retention() {
   const [carrierFilter, setCarrierFilter] = useState('all');
   const [producerFilter, setProducerFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
-  const [minTenureDays, setMinTenureDays] = useState(31);
+  const [flashCancelDays, setFlashCancelDays] = useState(31);
+  const [hidePreRenewal, setHidePreRenewal] = useState(false);
 
   // Corrections for unmatched sales — persisted to KV under `retention_overrides`.
   // Keyed by sale.id, applied before matching so a corrected row moves out of
@@ -271,9 +274,10 @@ export default function Retention() {
       matchResults,
       byApplicantId: policyMaster.byApplicantId,
       resolveProducer,
-      minTenureDays,
+      flashCancelDays,
+      hidePreRenewal,
     });
-  }, [policyMaster, matchResults, resolveProducer, minTenureDays]);
+  }, [policyMaster, matchResults, resolveProducer, flashCancelDays, hidePreRenewal]);
 
   const showResults = computation && !loading;
 
@@ -307,8 +311,10 @@ export default function Retention() {
           sourceFilter={sourceFilter}
           onSourceFilterChange={setSourceFilter}
           availableSources={availableSources}
-          minTenureDays={minTenureDays}
-          onMinTenureDaysChange={setMinTenureDays}
+          flashCancelDays={flashCancelDays}
+          onFlashCancelDaysChange={setFlashCancelDays}
+          hidePreRenewal={hidePreRenewal}
+          onHidePreRenewalChange={setHidePreRenewal}
         />
 
         {loadError && (
@@ -347,6 +353,16 @@ export default function Retention() {
                 producers={computation.producerRows}
                 showAdmins={showAdmins}
                 onToggleAdmins={setShowAdmins}
+              />
+            )}
+            {tab === 'projections' && (
+              <RenewalProjections
+                policyMaster={policyMaster}
+                resolveProducer={resolveProducer}
+                carrierFilter={carrierFilter}
+                producerFilter={producerFilter}
+                start={start}
+                end={end}
               />
             )}
             {tab === 'reviews' && (

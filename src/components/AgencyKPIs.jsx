@@ -56,8 +56,11 @@ export default function AgencyKPIs({ agency }) {
       />
       <Card
         label="Excluded"
-        value={agency.excludedNew + agency.excludedUnmatched + agency.excludedFlashCancel}
-        sub={`${agency.excludedNew} too new · ${agency.excludedUnmatched} unmatched · ${agency.excludedFlashCancel} flash cancel`}
+        value={agency.excludedUnmatched + agency.excludedFlashCancel + (agency.excludedPreRenewal || 0)}
+        sub={
+          `${agency.excludedUnmatched} unmatched · ${agency.excludedFlashCancel} flash cancel` +
+          (agency.excludedPreRenewal ? ` · ${agency.excludedPreRenewal} pre-renewal` : '')
+        }
         tone="amber"
       />
     </div>

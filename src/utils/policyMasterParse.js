@@ -24,6 +24,23 @@ function excelSerialToISO(v) {
   return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
+// "12 Months" / "6 Months" → 12 / 6. Anything else → null so we can decide
+// whether to treat unknown terms conservatively (we choose: include).
+function parseTermMonths(v) {
+  const m = String(v || '').match(/(\d+)/);
+  return m ? Number(m[1]) : null;
+}
+
+// Renewal date = eff + termMonths. Uses UTC math so we don't skew across
+// timezones. Month-end overflow (e.g. Jan 31 + 1mo) rolls forward like JS Date
+// (Feb 31 → Mar 3) — negligible for a "did the policy get past renewal" check.
+function computeRenewalDate(effIso, termMonths) {
+  if (!effIso || !termMonths) return null;
+  const [y, mo, d] = effIso.split('-').map(Number);
+  const target = new Date(Date.UTC(y, mo - 1 + termMonths, d));
+  return target.toISOString().slice(0, 10);
+}
+
 export function parsePolicyMaster(arrayBuffer) {
   const wb = XLSX.read(arrayBuffer, { type: 'array' });
   const detail = wb.Sheets['Detail'] || wb.Sheets[wb.SheetNames[0]];
@@ -34,7 +51,25 @@ export function parsePolicyMaster(arrayBuffer) {
     const policyNumberRaw = pickCol(r, 'Policy Number') || '';
     const txType = String(pickCol(r, 'Transaction Type') || '').trim();
     const applicantStatus = String(pickCol(r, 'Applicant Status') || '').trim();
-    const isCancelled = CANCEL_TX_TYPES.has(txType.toLowerCase());
+    const policyStatus = String(pickCol(r, 'Policy Status') || '').trim();
+    const cancellationDate = excelSerialToISO(pickCol(r, 'Policy Cancellation Date'));
+    // Authoritative cancellation signal: Policy Cancellation Date is populated,
+    // OR Policy Status / Applicant Status reads cancelled/lost/non-renew,
+    // OR Transaction Type matches a known cancel txn. Previously we trusted
+    // only Transaction Type, which misses rows whose latest txn is something
+    // else (NOC, Endorsement) even though the policy is dead.
+    const statusCancelled = /cancel|lost|non.?renew|inactive/i.test(policyStatus)
+      || /cancel|lost|non.?renew|inactive/i.test(applicantStatus);
+    const isCancelled = !!cancellationDate
+      || statusCancelled
+      || CANCEL_TX_TYPES.has(txType.toLowerCase());
+    const effectiveDate = excelSerialToISO(pickCol(r, 'Policy Effective Date'));
+    const termMonths = parseTermMonths(pickCol(r, 'Policy Term'));
+    // Prefer EZLynx's Policy Expiration Date column when present — it's the
+    // authoritative renewal boundary. Fall back to eff + term for old exports
+    // that didn't include the column.
+    const expirationDateRaw = pickCol(r, 'Policy Expiration Date') ?? pickCol(r, 'Expiration Date');
+    const expirationDate = excelSerialToISO(expirationDateRaw) || computeRenewalDate(effectiveDate, termMonths);
     return {
       applicantId: String(pickCol(r, 'Applicant ID') || '').trim(),
       accountName: String(pickCol(r, 'Account Name') || '').trim(),
@@ -48,12 +83,16 @@ export function parsePolicyMaster(arrayBuffer) {
       policyNumber: String(policyNumberRaw).trim(),
       policyNumberNorm: normalizePolicyNum(policyNumberRaw),
       policyType: pickCol(r, 'Policy Type') || '',
-      effectiveDate: excelSerialToISO(pickCol(r, 'Policy Effective Date')),
-      cancellationDate: excelSerialToISO(pickCol(r, 'Policy Cancellation Date')),
+      effectiveDate,
+      cancellationDate,
+      termMonths,
+      expirationDate,
+      renewalDate: computeRenewalDate(effectiveDate, termMonths),
       annualPremium: Number(pickCol(r, 'Premium - Annualized')) || 0,
       writtenPremium: Number(pickCol(r, 'Premium - Written')) || 0,
       transactionType: txType,
       applicantStatus,
+      policyStatus,
       isCancelled,
       isActive: !isCancelled,
     };

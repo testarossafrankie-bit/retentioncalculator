@@ -28,10 +28,16 @@ function num(v) {
 //                     match decisions (confirm/reject) in the caller.
 //   byApplicantId   — Applicant ID → policies map (from Policy Master).
 //   resolveProducer — canonicalizer for producer names.
-//   today           — reference date for tenure exclusion.
-//   minTenureDays   — customers whose earliest period sale is < this many
-//                     days old are excluded from retention. 0 = include all.
-export function computeRetention({ matchResults, byApplicantId, resolveProducer, today = new Date(), minTenureDays = 31 }) {
+//   today           — reference date for renewal checks.
+//   flashCancelDays — a customer is a flash cancel if EVERY matched period
+//                     policy died within this many days of its eff date.
+//                     0 = disable flash-cancel exclusion.
+//   hidePreRenewal  — when true, exclude customers whose every matched policy
+//                     is still in its first term AND still active. These
+//                     customers can't be "retained" or "lost" yet — they
+//                     haven't had a renewal event to measure. Prevents Travelers
+//                     12mo books from looking artificially high on YTD ranges.
+export function computeRetention({ matchResults, byApplicantId, resolveProducer, today = new Date(), flashCancelDays = 31, hidePreRenewal = false }) {
   const todayISO = toISO(today.toISOString());
 
   // Group matchResults by customer (across NB + rewrites for the same person).
@@ -157,17 +163,35 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
       || (!c.applicantId && c.salesRows.some(r => r.status === 'retained'));
 
     // Flash-cancel: every one of this customer's matched period policies
-    // cancelled within `minTenureDays` of its effective date. Signals non-pay,
+    // cancelled within `flashCancelDays` of its effective date. Signals non-pay,
     // buyer's remorse, or a quote-to-cancel — not real churn. If ANY period
     // policy stuck past the threshold, the customer isn't a flash cancel.
+    // Sale-age immaturity is handled by the date-range End filter, not here.
     const matchedPolicies = c.salesRows.map(r => r.policyMatch).filter(Boolean);
-    const isFlashCancel = matchedPolicies.length > 0 && matchedPolicies.every(pm => {
+    const isFlashCancel = flashCancelDays > 0 && matchedPolicies.length > 0 && matchedPolicies.every(pm => {
       if (!pm.isCancelled) return false;
       if (!pm.effectiveDate || !pm.cancellationDate) return false;
-      return daysBetween(pm.effectiveDate, pm.cancellationDate) < minTenureDays;
+      return daysBetween(pm.effectiveDate, pm.cancellationDate) < flashCancelDays;
     });
 
-    const eligible = tenureDays >= minTenureDays;
+    // Pre-renewal only: every sale in the period has (a) an active matched
+    // policy AND (b) not yet reached its first renewal boundary. The boundary
+    // uses the SALE'S original effective date + policy term — NOT the policy
+    // record's current effectiveDate, which advances on renewal at carriers
+    // like Progressive and would incorrectly flag renewed customers as pre-
+    // renewal. Any cancellation OR any past-boundary sale = signal (include).
+    // Unknown term or missing sale eff date = can't judge → include.
+    const isPreRenewalOnly = c.salesRows.length > 0 && c.salesRows.every(r => {
+      const pm = r.policyMatch;
+      if (!pm) return false;                       // unmatched handled elsewhere
+      if (pm.isCancelled) return false;            // real cancellation = signal
+      if (!pm.termMonths) return false;            // unknown term → include
+      const saleEffISO = toISO(r.sale.effDate) || toISO(r.sale.bindDate);
+      if (!saleEffISO) return false;
+      const [y, mo, d] = saleEffISO.split('-').map(Number);
+      const boundary = new Date(Date.UTC(y, mo - 1 + pm.termMonths, d)).toISOString().slice(0, 10);
+      return boundary > todayISO;
+    });
 
     // Any sale in the period marked isRewrite=true means we should also flag
     // this customer as having received a rewrite treatment.
@@ -186,8 +210,8 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
       producerIsKnown: producer.isKnown,
       firstEffDate: firstEff,
       tenureDays,
-      eligible,
       isFlashCancel,
+      isPreRenewalOnly,
       retained,
       hasRewriteInPeriod,
       writtenPremium,
@@ -216,11 +240,10 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
 
   const producerRows = [];
   for (const p of producers.values()) {
-    // Eligible = tenure >= threshold AND matched into the master AND NOT a
-    // flash cancel (all period policies cancelled within threshold days).
-    // Unmatched and flash cancels are excluded because they don't measure
-    // real retention — data hygiene / non-pay noise respectively.
-    const eligible = p.customers.filter(c => c.eligible && !c.allUnmatched && !c.isFlashCancel);
+    // Eligible = matched into the master AND NOT a flash cancel AND (when the
+    // toggle is on) NOT a pre-renewal-only customer.
+    const isEligible = (c) => !c.allUnmatched && !c.isFlashCancel && !(hidePreRenewal && c.isPreRenewalOnly);
+    const eligible = p.customers.filter(isEligible);
     const retained = eligible.filter(c => c.retained);
     const writtenPremium = p.customers.reduce((s, c) => s + c.writtenPremium, 0);
     // Annualized-at-bind version of writtenPremium — sums across ALL of the
@@ -230,9 +253,11 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
     const activePremium = eligible.reduce((s, c) => s + c.activePremium, 0);
     const activeWritten = eligible.reduce((s, c) => s + c.activeWritten, 0);
     const eligibleWritten = eligible.reduce((s, c) => s + c.writtenPremium, 0);
-    const excludedNew = p.customers.filter(c => !c.eligible).length;
-    const excludedUnmatched = p.customers.filter(c => c.eligible && c.allUnmatched).length;
-    const excludedFlashCancel = p.customers.filter(c => c.eligible && !c.allUnmatched && c.isFlashCancel).length;
+    const excludedUnmatched = p.customers.filter(c => c.allUnmatched).length;
+    const excludedFlashCancel = p.customers.filter(c => !c.allUnmatched && c.isFlashCancel).length;
+    const excludedPreRenewal = hidePreRenewal
+      ? p.customers.filter(c => !c.allUnmatched && !c.isFlashCancel && c.isPreRenewalOnly).length
+      : 0;
     // Annualized-at-bind denominator (from Policy Master via match). Used for
     // annualized retention so 6mo↔12mo term differences don't distort.
     const eligibleWrittenAnnualized = eligible.reduce((s, c) => s + c.writtenAnnualized, 0);
@@ -259,9 +284,9 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
       isAdmin: p.isAdmin,
       totalCustomers: p.customers.length,
       eligibleCustomers: eligible.length,
-      excludedNew,
       excludedUnmatched,
       excludedFlashCancel,
+      excludedPreRenewal,
       retainedCustomers: retained.length,
       writtenPremium,
       writtenAnnualized: writtenAnnualizedAll,
@@ -297,7 +322,8 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
   }
 
   // Agency-level roll-up. Same eligibility rule as producer rows.
-  const allEligible = customerStats.filter(c => c.eligible && !c.allUnmatched && !c.isFlashCancel);
+  const isAgencyEligible = (c) => !c.allUnmatched && !c.isFlashCancel && !(hidePreRenewal && c.isPreRenewalOnly);
+  const allEligible = customerStats.filter(isAgencyEligible);
   const allRetained = allEligible.filter(c => c.retained);
   const agencyWritten = customerStats.reduce((s, c) => s + c.writtenPremium, 0);
   // Annualized-at-bind across ALL customers (matches leaderboard's Written Ann
@@ -308,16 +334,18 @@ export function computeRetention({ matchResults, byApplicantId, resolveProducer,
   const agencyEligibleWrittenAnnualized = allEligible.reduce((s, c) => s + c.writtenAnnualized, 0);
   const agencyActive = allEligible.reduce((s, c) => s + c.activePremium, 0);
   const agencyActiveWritten = allEligible.reduce((s, c) => s + c.activeWritten, 0);
-  const agencyExcludedNew = customerStats.filter(c => !c.eligible).length;
-  const agencyExcludedUnmatched = customerStats.filter(c => c.eligible && c.allUnmatched).length;
-  const agencyExcludedFlashCancel = customerStats.filter(c => c.eligible && !c.allUnmatched && c.isFlashCancel).length;
+  const agencyExcludedUnmatched = customerStats.filter(c => c.allUnmatched).length;
+  const agencyExcludedFlashCancel = customerStats.filter(c => !c.allUnmatched && c.isFlashCancel).length;
+  const agencyExcludedPreRenewal = hidePreRenewal
+    ? customerStats.filter(c => !c.allUnmatched && !c.isFlashCancel && c.isPreRenewalOnly).length
+    : 0;
 
   const agency = {
     totalCustomers: customerStats.length,
     eligibleCustomers: allEligible.length,
-    excludedNew: agencyExcludedNew,
     excludedUnmatched: agencyExcludedUnmatched,
     excludedFlashCancel: agencyExcludedFlashCancel,
+    excludedPreRenewal: agencyExcludedPreRenewal,
     retainedCustomers: allRetained.length,
     custRetention: allEligible.length ? allRetained.length / allEligible.length : 0,
     writtenPremium: agencyWritten,

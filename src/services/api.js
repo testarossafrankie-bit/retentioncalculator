@@ -71,10 +71,10 @@ export async function fetchMatchDecisions() {
 // Frank doesn't re-upload each visit. The full parsed structure is ~3MB per
 // 5,400 policies (too big for one KV value), so we trim to just the fields
 // used downstream and use short keys to squeeze under Upstash's ~1MB limit.
-const SLIM_KEYS = { a: 'applicantId', n: 'accountName', p: 'policyNumber', c: 'carrier', l: 'lob', ap: 'annualPremium', wp: 'writtenPremium', ed: 'effectiveDate', cd: 'cancellationDate', x: 'isCancelled', ph: 'phone' };
+const SLIM_KEYS = { a: 'applicantId', n: 'accountName', p: 'policyNumber', c: 'carrier', l: 'lob', ap: 'annualPremium', wp: 'writtenPremium', ed: 'effectiveDate', cd: 'cancellationDate', x: 'isCancelled', ph: 'phone', tm: 'termMonths', xd: 'expirationDate' };
 
 function trimPolicy(p) {
-  return { a: p.applicantId, n: p.accountName, p: p.policyNumber, c: p.carrier, l: p.lob, ap: p.annualPremium, wp: p.writtenPremium, ed: p.effectiveDate, cd: p.cancellationDate, x: p.isCancelled, ph: p.phone };
+  return { a: p.applicantId, n: p.accountName, p: p.policyNumber, c: p.carrier, l: p.lob, ap: p.annualPremium, wp: p.writtenPremium, ed: p.effectiveDate, cd: p.cancellationDate, x: p.isCancelled, ph: p.phone, tm: p.termMonths, xd: p.expirationDate };
 }
 
 function expandPolicy(s) {
@@ -85,6 +85,18 @@ function expandPolicy(s) {
   // they're cheap to recompute and would ~double the KV payload.
   out.policyNumberNorm = normalizePolicyNum(out.policyNumber);
   out.accountNameNorm = normalizeName(out.accountName);
+  // Rehydrate renewalDate = eff + termMonths. Old records saved before termMonths
+  // was added → renewalDate stays null (treated as "unknown term" downstream).
+  if (out.effectiveDate && out.termMonths) {
+    const [y, mo, d] = out.effectiveDate.split('-').map(Number);
+    const target = new Date(Date.UTC(y, mo - 1 + out.termMonths, d));
+    out.renewalDate = target.toISOString().slice(0, 10);
+  } else {
+    out.renewalDate = null;
+  }
+  // expirationDate comes straight from EZLynx when the report includes that
+  // column; otherwise fall back to the eff+term derivation.
+  if (!out.expirationDate && out.renewalDate) out.expirationDate = out.renewalDate;
   return out;
 }
 

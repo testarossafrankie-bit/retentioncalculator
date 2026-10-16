@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const RANGE_PRESETS = [
   { id: 'last-full-month', label: 'Prior month' },
@@ -6,6 +6,25 @@ const RANGE_PRESETS = [
   { id: 'l12m', label: 'Last 12 months' },
   { id: 'custom', label: 'Custom…' },
 ];
+
+// Date input that keeps a local mirror of its value and only propagates to
+// the parent on blur / Enter. Prevents the expensive downstream recomputation
+// (matchSales, computeRetention) from firing on every intermediate keystroke.
+function CommittedDateInput({ value, onCommit, className }) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => { setLocal(value); }, [value]);
+  const commit = () => { if (local && local !== value) onCommit(local); };
+  return (
+    <input
+      type="date"
+      value={local}
+      onChange={e => setLocal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === 'Enter') { commit(); e.currentTarget.blur(); } }}
+      className={className}
+    />
+  );
+}
 
 export default function Controls({
   start, end, onStartChange, onEndChange,
@@ -20,7 +39,8 @@ export default function Controls({
   carrierFilter, onCarrierFilterChange, availableCarriers,
   producerFilter, onProducerFilterChange, availableProducers,
   sourceFilter, onSourceFilterChange, availableSources,
-  minTenureDays, onMinTenureDaysChange,
+  flashCancelDays, onFlashCancelDaysChange,
+  hidePreRenewal, onHidePreRenewalChange,
 }) {
   const fileRef = useRef();
   const [dragOver, setDragOver] = useState(false);
@@ -62,12 +82,12 @@ export default function Controls({
         </div>
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1">Start</label>
-          <input type="date" value={start} onChange={e => onStartChange(e.target.value)}
+          <CommittedDateInput value={start} onCommit={onStartChange}
             className="w-full border border-slate-300 rounded px-3 py-2 text-sm" />
         </div>
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1">End</label>
-          <input type="date" value={end} onChange={e => onEndChange(e.target.value)}
+          <CommittedDateInput value={end} onCommit={onEndChange}
             className="w-full border border-slate-300 rounded px-3 py-2 text-sm" />
         </div>
         <div className="md:col-span-2">
@@ -137,12 +157,12 @@ export default function Controls({
           </select>
         </div>
         <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1" title="Excludes both super-new customers and flash cancels (in-force less than N days)">
-            Exclude cases under
+          <label className="block text-xs font-semibold text-slate-600 mb-1" title="Excludes customers whose every matched policy died within N days of its effective date (non-pay / buyer's remorse). Use the End date to filter out immature sales.">
+            Flash cancel threshold
           </label>
           <select
-            value={minTenureDays}
-            onChange={e => onMinTenureDaysChange(Number(e.target.value))}
+            value={flashCancelDays}
+            onChange={e => onFlashCancelDaysChange(Number(e.target.value))}
             className="w-full border border-slate-300 rounded px-3 py-2 text-sm"
           >
             <option value={0}>None (include all)</option>
@@ -151,6 +171,18 @@ export default function Controls({
             <option value={90}>90 days</option>
           </select>
         </div>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        <label className="inline-flex items-center gap-2 text-xs text-slate-600 cursor-pointer" title="Removes customers whose every matched policy is still active AND still in its first term (no renewal event yet). Prevents 12mo books from looking inflated on YTD ranges.">
+          <input
+            type="checkbox"
+            checked={hidePreRenewal}
+            onChange={e => onHidePreRenewalChange(e.target.checked)}
+            className="rounded"
+          />
+          Hide policies that haven't had a chance to renew yet
+        </label>
       </div>
 
       {(carrierFilter !== 'all' || producerFilter !== 'all' || sourceFilter !== 'all') && (
