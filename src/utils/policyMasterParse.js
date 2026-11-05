@@ -75,10 +75,18 @@ export function parsePolicyMaster(arrayBuffer) {
     // else (NOC, Endorsement) even though the policy is dead.
     const statusCancelled = /cancel|lost|non.?renew|inactive/i.test(policyStatus)
       || /cancel|lost|non.?renew|inactive/i.test(applicantStatus);
-    const isCancelled = !!cancellationDate
-      || statusCancelled
-      || CANCEL_TX_TYPES.has(txType.toLowerCase());
     const effectiveDate = excelSerialToISO(pickCol(r, 'Policy Effective Date'));
+    // Bound-ahead policies (effective date in the future, no cancellation date)
+    // are often flagged "Inactive" in EZLynx until they take effect. Treat them
+    // as pending inception, not cancelled — otherwise every bound-ahead sale
+    // reads as lost on day one.
+    const todayISO = new Date().toISOString().slice(0, 10);
+    const isPendingInception = effectiveDate && effectiveDate > todayISO && !cancellationDate;
+    const isCancelled = !isPendingInception && (
+      !!cancellationDate
+        || statusCancelled
+        || CANCEL_TX_TYPES.has(txType.toLowerCase())
+    );
     const termMonths = parseTermMonths(pickCol(r, 'Policy Term'));
     // Prefer EZLynx's Policy Expiration Date column when present — it's the
     // authoritative renewal boundary. Fall back to eff + term for old exports
