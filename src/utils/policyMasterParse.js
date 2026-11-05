@@ -22,13 +22,19 @@ function pickCol(row, name) {
 
 function excelSerialToISO(v) {
   if (v == null || v === '') return null;
+  let iso;
   if (typeof v === 'number') {
     const utcDays = Math.floor(v - 25569);
     const utcMs = utcDays * 86400 * 1000;
-    return new Date(utcMs).toISOString().slice(0, 10);
+    iso = new Date(utcMs).toISOString().slice(0, 10);
+  } else {
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return null;
+    iso = d.toISOString().slice(0, 10);
   }
-  const d = new Date(v);
-  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  // EZLynx writes 1/1/1900 as a null-date sentinel. Treat any pre-2000 date
+  // as "no date" so sentinels don't poison downstream logic.
+  return iso >= '2000-01-01' ? iso : null;
 }
 
 // "12 Months" / "6 Months" → 12 / 6. Anything else → null so we can decide
