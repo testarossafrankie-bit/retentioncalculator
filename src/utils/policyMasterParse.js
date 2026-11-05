@@ -102,6 +102,7 @@ export function parsePolicyMaster(arrayBuffer) {
       cancellationDate,
       termMonths,
       expirationDate,
+      lobOriginationDate: excelSerialToISO(pickCol(r, 'LOB Origination Date')),
       renewalDate: computeRenewalDate(effectiveDate, termMonths),
       annualPremium: Number(pickCol(r, 'Premium - Annualized')) || 0,
       writtenPremium: Number(pickCol(r, 'Premium - Written')) || 0,

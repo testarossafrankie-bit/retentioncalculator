@@ -97,14 +97,36 @@ export default function RenewalProjections({ policyMaster, resolveProducer, carr
     // Prefer expirationDate (EZLynx-authoritative). Fall back to renewalDate
     // (eff + term) for policies where the export didn't include it.
     const dateOf = (p) => p.expirationDate || p.renewalDate;
-    const active = policyMaster.policies.filter(p => p.isActive && dateOf(p));
-    const filtered = active.filter(p => {
-      const d = dateOf(p);
-      if (d < start || d > end) return false;
-      if (carrierFilter !== 'all' && p.carrier !== carrierFilter) return false;
-      if (producerFilter !== 'all' && resolveProducer(p.producer || '').canonical !== producerFilter) return false;
-      return true;
-    });
+
+    // When a policy renews, EZLynx rolls expirationDate forward by a term —
+    // so a policy that renewed on 11/2/2026 now shows expiration 11/2/2027 and
+    // falls outside a Nov 2026 window. To still count it, also check the
+    // prior term's expiration (which equals the current effective date), but
+    // only when the policy had an earlier term (LOB Origination Date before
+    // current effective date). New business has no prior expiration event.
+    const expInRange = (p) => {
+      const exp = dateOf(p);
+      if (!exp) return null;
+      if (exp >= start && exp <= end) return exp;
+      if (p.effectiveDate && p.lobOriginationDate && p.lobOriginationDate < p.effectiveDate) {
+        const priorExp = p.effectiveDate;
+        if (priorExp >= start && priorExp <= end) return priorExp;
+      }
+      return null;
+    };
+
+    // Each entry carries the in-range expiration date so the month bucket
+    // reflects WHEN the event happened in the range, not the rolled-forward
+    // current expirationDate.
+    const matched = [];
+    for (const p of policyMaster.policies) {
+      if (!p.isActive) continue;
+      const exp = expInRange(p);
+      if (!exp) continue;
+      if (carrierFilter !== 'all' && p.carrier !== carrierFilter) continue;
+      if (producerFilter !== 'all' && resolveProducer(p.producer || '').canonical !== producerFilter) continue;
+      matched.push({ policy: p, exp });
+    }
 
     const commRateFor = (carrier) => {
       const stored = carrierCommissions[carrier];
@@ -116,7 +138,7 @@ export default function RenewalProjections({ policyMaster, resolveProducer, carr
     const byCarrier = new Map();
     const totals = { count: 0, writtenPrem: 0, annualPrem: 0, retainedWr: 0, commission: 0 };
 
-    for (const p of filtered) {
+    for (const { policy: p, exp } of matched) {
       const commRate = commRateFor(p.carrier);
       const retained = p.writtenPremium * retMult;
       const commission = retained * commRate;
@@ -127,7 +149,7 @@ export default function RenewalProjections({ policyMaster, resolveProducer, carr
       totals.retainedWr += retained;
       totals.commission += commission;
 
-      const ym = (p.expirationDate || p.renewalDate).slice(0, 7);
+      const ym = exp.slice(0, 7);
       if (!byMonth.has(ym)) byMonth.set(ym, { count: 0, writtenPrem: 0, annualPrem: 0, retainedWr: 0, commission: 0 });
       const m = byMonth.get(ym);
       m.count++;
@@ -155,7 +177,8 @@ export default function RenewalProjections({ policyMaster, resolveProducer, carr
       .map(([c, b]) => ({ carrier: c, ...b }));
 
     const activeAll = policyMaster.policies.filter(p => p.isActive);
-    return { months, carriers, totals, untermed: activeAll.length - active.length, activeCount: activeAll.length };
+    const activeWithDate = activeAll.filter(p => dateOf(p)).length;
+    return { months, carriers, totals, untermed: activeAll.length - activeWithDate, activeCount: activeAll.length };
   }, [policyMaster, resolveProducer, carrierFilter, producerFilter, start, end, carrierCommissions, retMult]);
 
   if (!projection) return null;
